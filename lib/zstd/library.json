@@ -1,0 +1,17 @@
+{
+  "name": "zstd",
+  "version": "1.5.7",
+  "description": "Zstandard 1.5.7 decoder only (BSD-3-Clause), vendored for the ZIM device spike",
+  "license": "BSD-3-Clause",
+  "build": {
+    "srcDir": ".",
+    "includeDir": ".",
+    "flags": [
+      "-O2",
+      "-DZSTD_LEGACY_SUPPORT=0",
+      "-DZSTD_DISABLE_ASM=1",
+      "-DZSTD_STRIP_ERROR_STRINGS=1",
+      "-DZSTD_NO_TRACE=1"
+    ]
+  }
+}
