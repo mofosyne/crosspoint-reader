@@ -1,0 +1,51 @@
+# Raw serial output from the reTerminal Sticky, build sticky_zimspike, 2026-11-06 (pasted by the user).
+# Console via the WCH USB-UART bridge at 115200. Only the boot banner and the ZSPK section are kept.
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x5 (DSLEEP),boot:0xa (SPI_FAST_FLASH_BOOT)
+pro cpu reset by JTAG
+[459] [INF] [GYR] SDK IMU initialized
+[459] [INF] [CLK] SDK RTC found[459] [INF] [MAIN] Device: sticky
+[502] [INF] [ZSPK] === ZIM spike start ===
+[503] [INF] [ZSPK] heap boot: internal free=239368 largest=172020 min=234128 | psram free=8383576 largest=8257524 total=8388608
+[507] [INF] [ZSPK] file /zim/wikipedia_en_all_mini_2024-04.zim size=7400302566 bytes
+[513] [INF] [ZSPK] heap after 4MiB buffers: internal free=239272 largest=172020 min=234032 | psram free=4090960 largest=4063220 total=8388608
+[618] [INF] [ZSPK] seq 256KB single read @1850075641: r=262144 92201 us = 2776 KB/s
+[711] [INF] [ZSPK] seq 256KB single read @3700151282: r=262144 92041 us = 2781 KB/s
+[804] [INF] [ZSPK] seq 256KB single read @5550226923: r=262144 91864 us = 2786 KB/s
+[896] [INF] [ZSPK] seq 256KB as 8x32KB @1487400545: 90357 us = 2833 KB/s
+[987] [INF] [ZSPK] seq 256KB as 8x32KB @2967461058: 89696 us = 2854 KB/s
+[1195] [INF] [ZSPK] random 512B read           n=300 avg=625 min=550 max=703 us
+[1200] [INF] [ZSPK] ZimReader::open st=0 4334 us, 2 reads, entries=9339419 clusters=15529
+[1200] [INF] [ZSPK] heap after zim open: internal free=237016 largest=172020 min=231776 | psram free=3994700 largest=3932148 total=8388608
+[1616] [INF] [ZSPK] Albert_Einstein                    find=48503 us (92 reads) blob=26778 B cluster=5699 total=356312 sd=62195 decode=293925 us (frame says 18446744073709551615 B)
+[1968] [INF] [ZSPK] Brock_Downey                       find=24047 us (46 reads) blob=5978 B cluster=9744 total=315481 sd=52389 decode=262900 us (frame says 18446744073709551615 B)
+[2330] [INF] [ZSPK] Imma_homocrossa                    find=24634 us (46 reads) blob=5698 B cluster=4646 total=328493 sd=55202 decode=273100 us (frame says 18446744073709551615 B)
+[2695] [INF] [ZSPK] Carl_Wahlbom                       find=24640 us (44 reads) blob=3551 B cluster=12589 total=331723 sd=56037 decode=275500 us (frame says 18446744073709551615 B)
+[3045] [INF] [ZSPK] James_Belich_(historian)           find=25415 us (46 reads) blob=7638 B cluster=15050 total=315302 sd=51454 decode=263660 us (frame says 18446744073709551615 B)
+[3397] [INF] [ZSPK] 29_Herculis                        find=22703 us (46 reads) blob=13435 B cluster=14141 total=321277 sd=52907 decode=268184 us (frame says 18446744073709551615 B)
+[3762] [INF] [ZSPK] Harry_Hewitt                       find=25523 us (46 reads) blob=9197 B cluster=8487 total=328911 sd=54129 decode=274594 us (frame says 18446744073709551615 B)
+[4135] [INF] [ZSPK] Denali_(album)                     find=24464 us (46 reads) blob=10313 B cluster=6069 total=335696 sd=56615 decode=278895 us (frame says 18446744073709551615 B)
+[4486] [INF] [ZSPK] Akers'_clasp                       find=16700 us (32 reads) blob=4294 B cluster=14556 total=325041 sd=54606 decode=270246 us (frame says 18446744073709551615 B)
+[4850] [INF] [ZSPK] Conrow_Fire                        find=21785 us (40 reads) blob=10911 B cluster=4922 total=330889 sd=55261 decode=275443 us (frame says 18446744073709551615 B)
+[5218] [INF] [ZSPK] David_Butcher                      find=25648 us (48 reads) blob=10324 B cluster=8146 total=325606 sd=54433 decode=270983 us (frame says 18446744073709551615 B)
+[5587] [INF] [ZSPK] 113th_Wing                         find=26679 us (46 reads) blob=9811 B cluster=4186 total=331518 sd=55772 decode=275556 us (frame says 18446744073709551615 B)
+[5959] [INF] [ZSPK] Chinese_Taipei_at_the_2000_Summer_ find=25664 us (46 reads) blob=11929 B cluster=2496 total=332697 sd=56317 decode=276194 us (frame says 18446744073709551615 B)
+[6315] [INF] [ZSPK] Chauvay                            find=21428 us (36 reads) blob=11572 B cluster=6297 total=326201 sd=54483 decode=271526 us (frame says 18446744073709551615 B)
+[6678] [INF] [ZSPK] Ficus_castellviana                 find=25247 us (44 reads) blob=6305 B cluster=7522 total=328634 sd=55605 decode=272834 us (frame says 18446744073709551615 B)
+[7040] [INF] [ZSPK] Ian_Fang                           find=23308 us (44 reads) blob=14881 B cluster=11740 total=330772 sd=55147 decode=275439 us (frame says 18446744073709551615 B)
+[7408] [INF] [ZSPK] Craig_Bartlett_(cricketer)         find=25228 us (46 reads) blob=7050 B cluster=10629 total=333788 sd=56060 decode=277538 us (frame says 18446744073709551615 B)
+[7788] [INF] [ZSPK] 1986–87_Scottish_Cup             find=28051 us (46 reads) blob=5399 B cluster=935 total=343279 sd=58787 decode=284304 us (frame says 18446744073709551615 B)
+[8169] [INF] [ZSPK] Klostertal                         find=22194 us (38 reads) blob=9001 B cluster=3107 total=338539 sd=57186 decode=281164 us (frame says 18446744073709551615 B)
+[8525] [INF] [ZSPK] Fulvio_Pelli                       find=23999 us (46 reads) blob=8556 B cluster=11448 total=318726 sd=52625 decode=265907 us (frame says 18446744073709551615 B)
+[8883] [INF] [ZSPK] Deepak_Kumar_(physicist)           find=22523 us (42 reads) blob=8307 B cluster=11938 total=323420 sd=54262 decode=268970 us (frame says 18446744073709551615 B)
+[8888] [INF] [ZSPK] findContent                n=21 avg=25161 min=16700 max=48503 us
+[8895] [INF] [ZSPK] findContent reads          n=21 avg=46 min=32 max=92 us
+[8902] [INF] [ZSPK] readBlob total             n=21 avg=329633 min=315302 max=356312 us
+[8909] [INF] [ZSPK] readBlob SD time           n=21 avg=55308 min=51454 max=62195 us
+[8917] [INF] [ZSPK] readBlob zstd decode       n=21 avg=274136 min=262900 max=293925 us
+[8925] [INF] [ZSPK] article HTML bytes         n=21 avg=9568 min=3551 max=26778 us
+[8986] [INF] [ZSPK] title search 'Albert Ein' + 5 entries: 53563 us, 84 reads
+[8986] [INF] [ZSPK] heap end: internal free=239272 largest=172020 min=231348 | psram free=4090960 largest=4063220 total=8388608
+[8992] [INF] [ZSPK] === ZIM spike done ===
+# (the "us" after the reads/bytes rows is a logging label slip: those rows are counts and bytes, not microseconds)

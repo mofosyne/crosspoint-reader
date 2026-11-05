@@ -1,0 +1,16 @@
+# htmlToPlainText on the real Albert_Einstein article (tools/render_probe.cpp.txt)
+mini : html 26778 bytes -> text 12241 bytes; inline <style> blocks: 8 (6133 bytes of CSS leaked into the text)
+nopic: html 590969 bytes -> text 183359 bytes; inline <style> blocks: 20 (19836 bytes of CSS)
+Raw HTML starts with <!DOCTYPE html><html class="client-js"><head><meta charset="UTF-8"><title>...</title>, then
+~20 <link rel="stylesheet"> and 5 external <script src> tags, then <body> (Minerva/Parsoid markup).
+
+# Repo normalizer (writeNormalizedXhtml, copied verbatim) + expat, tools/xhtml_probe2.cpp.txt
+file                                   as-is (default handler, no DOCTYPE)   named entities resolved
+mini_Albert_Einstein                   FAIL (undefined entity &nbsp;)        OK
+nopic_Albert_Einstein                  FAIL                                  OK
+nopic_Main_Page                        FAIL                                  OK
+nopic_Moon                             FAIL                                  OK
+nopic_Paris                            FAIL                                  OK
+nopic_Python_(programming_language)    FAIL                                  OK
+nopic_Zebra                            FAIL                                  OK
+as-is 0/7 parse; with entities resolved 7/7 parse

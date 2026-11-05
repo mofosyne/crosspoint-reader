@@ -1,0 +1,6 @@
+# Firmware sizes, env sticky on branch test/zim-device-spike (app partition 6,553,600 B)
+sticky (no spike):          RAM 77,980 B (23.8%)   Flash 5,303,483 B (80.9%)
+sticky_zimspike:            RAM 77,980 B (23.8%)   Flash 5,377,379 B (82.1%)   delta +73,896 B
+sticky_zimspike firmware.bin 5,382,640 B; flashing took 49 s at 921600 baud; whole upload command 104 s.
+default (X3/X4, develop + Range branch, earlier run): Flash 5,570,203 B (85.0%), RAM 66,400 B stated by pio as 20.3%.
+Host test suite at last full run: 908 tests passed (ZimReader synthetic 23 + real-file 5 skip without ZIM_TEST_FILE).

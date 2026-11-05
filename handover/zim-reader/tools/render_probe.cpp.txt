@@ -1,0 +1,62 @@
+// Throwaway: run the repo's htmlToPlainText on a real ZIM article.
+#include <stdio.h>
+#include <stdlib.h>
+#include <zstd.h>
+
+#include <string>
+#include <vector>
+
+#include "HtmlToPlainText.h"
+#include "ZimReader.h"
+
+class FileSource : public freeink::content::ByteSource {
+ public:
+  explicit FileSource(const char* p) : f_(fopen(p, "rb")) {
+    if (f_ && fseeko(f_, 0, SEEK_END) == 0) size_ = static_cast<uint64_t>(ftello(f_));
+  }
+  int32_t readAt(uint64_t o, void* d, uint32_t n) override {
+    if (!f_ || fseeko(f_, static_cast<off_t>(o), SEEK_SET) != 0) return -1;
+    return static_cast<int32_t>(fread(d, 1, n, f_));
+  }
+  uint64_t size() const override { return size_; }
+  bool ok() const { return f_ != nullptr; }
+ private:
+  FILE* f_ = nullptr;
+  uint64_t size_ = 0;
+};
+
+class Zstd : public zim::ClusterDecoder {
+ public:
+  int64_t decode(zim::Compression, const uint8_t* s, size_t n, uint8_t* d, size_t cap) override {
+    const size_t f = ZSTD_findFrameCompressedSize(s, n);
+    if (ZSTD_isError(f)) return zim::DECODE_ERROR;
+    const size_t r = ZSTD_decompress(d, cap, s, f);
+    return ZSTD_isError(r) ? zim::DECODE_ERROR : static_cast<int64_t>(r);
+  }
+};
+
+int main(int argc, char** argv) {
+  if (argc < 4) return 2;
+  FileSource src(argv[1]);
+  if (!src.ok()) return 3;
+  zim::ZimReader zr;
+  if (zr.open(src) != zim::Status::Ok) return 4;
+  zim::Entry e;
+  if (zr.findContent(argv[2], e) != zim::Status::Ok || zr.resolveRedirects(e) != zim::Status::Ok) return 5;
+  std::vector<uint8_t> packed(16u << 20), plain(16u << 20);
+  zim::Workspace w{packed.data(), packed.size(), plain.data(), plain.size()};
+  Zstd dec;
+  zim::Blob b;
+  if (zr.readBlob(e.clusterNumber, e.blobNumber, &dec, w, b) != zim::Status::Ok) return 6;
+  std::string html(reinterpret_cast<const char*>(b.data), b.size);
+  FILE* fh = fopen((std::string(argv[3]) + ".html").c_str(), "wb");
+  fwrite(html.data(), 1, html.size(), fh);
+  fclose(fh);
+  const size_t in = html.size();
+  std::string text = htmlToPlainText(std::move(html), '#');
+  FILE* ft = fopen((std::string(argv[3]) + ".txt").c_str(), "wb");
+  fwrite(text.data(), 1, text.size(), ft);
+  fclose(ft);
+  printf("html %zu bytes -> text %zu bytes\n", in, text.size());
+  return 0;
+}

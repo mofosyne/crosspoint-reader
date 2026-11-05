@@ -1,0 +1,22 @@
+# Table positions versus the last cluster (tools/zim_layout.py, 2026-11-05).
+# "extent to checksum" is how far past the last cluster start the checksum lies: the tables and
+# directory entries follow the clusters, so the last cluster has no stored end.
+devdocs_en_c_2025-01.zim v6.2          mime 80  urlPtr 1275297        titlePtr 1242576        clusterPtr 1280225        lastCluster 496878       checksum 1280257        extent 783379
+rationalwiki_en_all_nopic_2021-03 v5.0 mime 80  urlPtr 79217132       titlePtr 79319252       clusterPtr 79370312       lastCluster 44296916     checksum 79371232       extent 35074316
+wikipedia_en_all_mini_2024-04 v5.0     mime 80  urlPtr 7288105290     titlePtr 7362820642     clusterPtr 7400178318     lastCluster 4319343303   checksum 7400302550     extent 3080959247
+wikipedia_en_all_nopic_2024-06 v6.0    mime 80  urlPtr 56953018904    titlePtr 57100459040    clusterPtr 57174179108    lastCluster 38072893465  checksum 57175319068    extent 19102425603
+wikipedia_en_all_maxi_2024-01 v6.0     mime 80  urlPtr 109585377280   titlePtr 109784641888   clusterPtr 109884274192   lastCluster 90568103796  checksum 109885670560   extent 19317566764
+first cluster offset is 1024 in every file.
+
+# Read cost per operation on the host (ZimRealFile.ReadCostPerOperation), cold, counted at the ByteSource.
+# Before bounding each directory entry read by the next pointer (fixed 1 KiB reads), mini:
+  findContent Albert_Einstein         92 reads  139 sectors   47472 bytes
+  lowerBoundTitle 'Albert Ein'        69 reads   88 sectors   23828 bytes
+  list 5 matching titles              15 reads    7 sectors    5180 bytes
+  readBlob (cluster read)              3 reads  343 sectors  174640 bytes
+# After:
+  findContent Albert_Einstein         92 reads   75 sectors    3080 bytes
+  lowerBoundTitle 'Albert Ein'        69 reads   58 sectors    1775 bytes
+  list 5 matching titles              15 reads    4 sectors     396 bytes
+  readBlob (cluster read)              3 reads  343 sectors  174640 bytes
+# After the namespace memo (nopic, repeat lookups): Paris 46, Moon 48, Python_(programming_language) 48, Zebra 46 reads (~40 sectors).

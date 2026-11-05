@@ -1,0 +1,77 @@
+# Output of tools/zim_probe.py (final version) on five Kiwix archives, run by the user 2026-11-05.
+# "compressed clusters" lines exclude uncompressed ones; "window" is the declared zstd window.
+# The Wikipedia "uncompressed clusters ... largest" figures are the large index clusters at the end of the file.
+== wikipedia_en_all_mini_2024-04.zim
+file size       : 7400302566 bytes (6.89 GiB)
+version         : 5.0
+entries         : 9339419
+clusters        : 15529
+checksum pos    : 7400302550
+mime types (10) : application/javascript, application/octet-stream+xapian, application/pdf, image/png, image/svg+xml, image/svg+xml; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/SVG/1.0.0", text/css, text/html, text/plain, undefined
+sampled clusters: 2219 (every 7)
+compression     : {'zstd': 2212, 'none': 7}
+blob offsets    : {'32-bit offsets': 2219}
+compressed clusters: min 127764 / median 156045 / max 191363 bytes
+uncompressed clusters: 7, largest 1807949833 bytes
+cluster 14889: zstd 191363 -> 2092640 bytes, window 8388608 bytes
+cluster 959: zstd 162746 -> 2057101 bytes, window 8388608 bytes
+cluster 2590: zstd 156047 -> 2085938 bytes, window 8388608 bytes
+== wikipedia_en_all_nopic_2024-06.zim
+file size       : 57175319084 bytes (53.25 GiB)
+version         : 6.0
+entries         : 18430017
+clusters        : 142495
+checksum pos    : 57175319068
+mime types (10) : (same ten types as mini)
+sampled clusters: 2007 (every 71)
+compression     : {'zstd': 1988, 'none': 19}
+blob offsets    : {'32-bit offsets': 2007}
+compressed clusters: min 113088 / median 224831 / max 287308 bytes
+uncompressed clusters: 19, largest 2096415 bytes
+cluster 141077: zstd 287308 -> 1830944 bytes, window 8388608 bytes
+cluster 66314: zstd 246254 -> 2079078 bytes, window 8388608 bytes
+cluster 102382: zstd 224833 -> 2085127 bytes, window 8388608 bytes
+== wikipedia_en_all_maxi_2024-01.zim
+file size       : 109885670576 bytes (102.34 GiB)
+version         : 6.0
+entries         : 24908076
+clusters        : 174546
+checksum pos    : 109885670560
+mime types (12) : (the ten types plus image/gif and image/webp)
+sampled clusters: 2007 (every 87)
+compression     : {'zstd': 1728, 'none': 279}
+blob offsets    : {'32-bit offsets': 2007}
+compressed clusters: min 63175 / median 243680 / max 309680 bytes
+uncompressed clusters: 279, largest 7454109 bytes
+cluster 37758: zstd 309680 -> 2026564 bytes, window 8388608 bytes
+cluster 33147: zstd 268209 -> 2088777 bytes, window 8388608 bytes
+cluster 34365: zstd 243689 -> 2056540 bytes, window 8388608 bytes
+== rationalwiki_en_all_nopic_2021-03.zim
+file size       : 79371248 bytes (0.07 GiB)
+version         : 5.0
+entries         : 12765
+clusters        : 115
+checksum pos    : 79371232
+mime types (8)  : application/javascript, application/octet-stream+xapian, image/png, image/webp, text/css, text/html, text/plain, undefined
+sampled clusters: 115 (every 1)
+compression     : {'zstd': 112, 'none': 3}
+blob offsets    : {'32-bit offsets': 115}
+compressed clusters: min 235514 / median 373728 / max 406445 bytes
+uncompressed clusters: 3, largest 35074316 bytes
+cluster 18: zstd 406445 -> 2083481 bytes, window 134217728 bytes
+cluster 42: zstd 385813 -> 2095353 bytes, window 134217728 bytes
+cluster 40: zstd 373784 -> 2093497 bytes, window 134217728 bytes
+== devdocs_en_c_2025-01.zim
+file size       : 1280273 bytes (0.00 GiB)
+version         : 6.2
+entries         : 616
+clusters        : 4
+checksum pos    : 1280257
+mime types (9)  : application/json, application/octet-stream, application/octet-stream+xapian, application/octet-stream+zimlisting, image/png, text/css, text/html, text/plain, text/plain;charset=UTF-8
+sampled clusters: 4 (every 1)
+compression     : {'zstd': 3, 'none': 1}
+blob offsets    : {'32-bit offsets': 4}
+compressed clusters: min 95823 / median 179115 / max 219892 bytes
+uncompressed clusters: 1, largest 783379 bytes
+cluster 0: zstd 219892 -> 2095332 bytes, window 8388608 bytes
+cluster 1: zstd 179115 -> 2094723 bytes, window 8388608 bytes
