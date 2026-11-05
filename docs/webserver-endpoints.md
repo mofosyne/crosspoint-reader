@@ -117,6 +117,17 @@ Protected dotfiles, `System Volume Information`, `XTCache`, and the credential
 stores cannot be downloaded. EPUB files are served as `application/epub+zip`; other files use
 `application/octet-stream`.
 
+A single `Range: bytes=start-end`, `bytes=start-` or `bytes=-suffix` header returns
+`206 Partial Content` with `Content-Range`; a range starting past the end of the file
+returns `416` with `Content-Range: bytes */size`. Multiple ranges, other units and
+malformed values are ignored and the whole file is sent with `200`. Responses carry
+`Accept-Ranges: bytes`. A single response cannot exceed just under 4 GiB: a larger file
+needs a `Range` request (without one it gets `413`), and a longer range is cut short.
+
+```bash
+curl -i -H "Range: bytes=0-79" "http://crosspoint.local/download?path=/wiki.zim"
+```
+
 ### `POST /upload`
 
 Uploads a file with HTTP multipart form data.

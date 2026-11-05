@@ -40,6 +40,7 @@
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
+#include "HttpRange.h"
 #include "OpdsServerStore.h"
 #include "ProtectedPaths.h"
 #include "SdCardFontSystem.h"
@@ -441,9 +442,9 @@ void CrossPointWebServer::begin() {
   // Collect WebDAV headers and register handler
   // If-None-Match is collected so static pages and plugin files can answer conditional GETs with 304,
   // and Host for the captive-portal check
-  const char* collectedHeaders[] = {"Depth",      "Destination", "Overwrite",     "If",
-                                    "Lock-Token", "Timeout",     "If-None-Match", "Host"};
-  server->collectHeaders(collectedHeaders, 8);
+  const char* collectedHeaders[] = {"Depth",   "Destination",   "Overwrite", "If",   "Lock-Token",
+                                    "Timeout", "If-None-Match", "Host",      "Range"};
+  server->collectHeaders(collectedHeaders, 9);
   server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
   LOG_DBG("WEB", "WebDAV handler initialized");
 
@@ -872,21 +873,25 @@ void CrossPointWebServer::handleFileListData() const {
   LOG_DBG("WEB", "Served file listing page for path: %s", currentPath.c_str());
 }
 
-void CrossPointWebServer::streamFileToClient(HalFile& file) const {
+void CrossPointWebServer::streamFileToClient(HalFile& file, size_t length) const {
   NetworkClient client = server->client();
   static constexpr size_t CHUNK_SIZE = 4096;
+  if (length == 0) return;
+  const size_t bufferSize = length < CHUNK_SIZE ? length : CHUNK_SIZE;
   // Off the stack: the web-server task also runs TLS and SD from this stack.
-  auto buffer = makeUniqueNoThrow<uint8_t[]>(CHUNK_SIZE);
+  auto buffer = makeUniqueNoThrow<uint8_t[]>(bufferSize);
   if (!buffer) {
-    LOG_ERR("WEB", "OOM: %u byte stream buffer", (unsigned)CHUNK_SIZE);
+    LOG_ERR("WEB", "OOM: %u byte stream buffer", (unsigned)bufferSize);
     return;
   }
 
   bool ok = true;
-  while (ok && file.available()) {
-    const int result = file.read(buffer.get(), CHUNK_SIZE);
+  size_t remaining = length;
+  while (ok && remaining > 0 && file.available()) {
+    const int result = file.read(buffer.get(), remaining < CHUNK_SIZE ? remaining : CHUNK_SIZE);
     if (result <= 0) break;
     const size_t bytesRead = static_cast<size_t>(result);
+    remaining -= bytesRead;
     size_t totalWritten = 0;
     while (totalWritten < bytesRead) {
       resetTaskWatchdogIfSubscribed();
@@ -952,10 +957,48 @@ void CrossPointWebServer::handleDownload() const {
     filename = nameBuf;
   }
 
-  server->setContentLength(file.size());
+  const uint64_t fileSize = file.fileSize64();
+  const httprange::Result range = httprange::parse(server->header("Range").c_str(), fileSize);
+  server->sendHeader("Accept-Ranges", "bytes");
+  char rangeHeader[72];
+  if (range.kind == httprange::Kind::Unsatisfiable) {
+    file.close();
+    snprintf(rangeHeader, sizeof(rangeHeader), "bytes */%llu", (unsigned long long)fileSize);
+    server->sendHeader("Content-Range", rangeHeader);
+    server->send(416, "text/plain", "Range not satisfiable");
+    return;
+  }
+
+  // Content-Length is a 32-bit size_t, and the top two values mean "unknown"/"not set" to WebServer.
+  constexpr uint64_t MAX_BODY = SIZE_MAX - 3;
+  if (range.kind == httprange::Kind::Full && fileSize > MAX_BODY) {
+    file.close();
+    server->send(413, "text/plain", "File too large for one response, use a Range request");
+    return;
+  }
+
+  size_t sendLength = static_cast<size_t>(fileSize);
+  int status = 200;
+  if (range.kind == httprange::Kind::Partial) {
+    // A longer range is cut short, which the spec allows.
+    const uint64_t end = httprange::clampEnd(range.start, range.end, MAX_BODY);
+    if (!file.seek64(range.start)) {
+      file.close();
+      LOG_ERR("WEB", "Range seek failed: %llu", (unsigned long long)range.start);
+      server->send(500, "text/plain", "Seek failed");
+      return;
+    }
+    sendLength = static_cast<size_t>(end - range.start + 1);
+    status = 206;
+    snprintf(rangeHeader, sizeof(rangeHeader), "bytes %llu-%llu/%llu", (unsigned long long)range.start,
+             (unsigned long long)end, (unsigned long long)fileSize);
+    server->sendHeader("Content-Range", rangeHeader);
+  }
+
+  server->setContentLength(sendLength);
   server->sendHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-  server->send(200, contentType.c_str(), "");
-  streamFileToClient(file);
+  server->send(status, contentType.c_str(), "");
+  streamFileToClient(file, sendLength);
   file.close();
 }
 

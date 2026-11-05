@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
+#include <stdint.h>
 
 #include <memory>
 #include <span>
@@ -111,9 +112,10 @@ class CrossPointWebServer {
   void handleDownload() const;
   // Streams an already-open file to the client in 4KB chunks, feeding the
   // watchdog per write and aborting cleanly (rather than looping past a dead
-  // connection) if a write stalls. Caller sets headers/content-length and
-  // closes the file.
-  void streamFileToClient(HalFile& file) const;
+  // connection) if a write stalls. Sends at most `length` bytes from the
+  // file's current position. Caller sets headers/content-length and closes
+  // the file.
+  void streamFileToClient(HalFile& file, size_t length = SIZE_MAX) const;
   void handleUpload(UploadState& state) const;
   void handleUploadPost(UploadState& state) const;
   void handleCreateFolder() const;
