@@ -51,6 +51,9 @@
 #include "util/ScreenshotUtil.h"
 #include "util/SlideSwitch.h"
 #include "util/Timezones.h"
+#ifdef ZIM_DEVICE_TEST
+#include "zimtest/ZimDeviceTest.h"
+#endif
 
 #if CROSSPOINT_VECTOR_FONTS
 // Rendering (incl. FreeType TTF rasterization) runs on the Arduino loop task.
@@ -643,6 +646,9 @@ void setup() {
   }
 
   HalSystem::checkPanic();
+#ifdef ZIM_DEVICE_TEST
+  zimDeviceTestRun();
+#endif
 
   APP_STATE.loadFromFile();
   const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
