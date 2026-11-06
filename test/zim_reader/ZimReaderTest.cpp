@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ZimBlobLoader.h"
+#include "ZimBrowser.h"
 #include "ZimReader.h"
 
 #ifdef ZIM_TEST_HAVE_ZSTD
@@ -1095,3 +1096,104 @@ TEST(ZimBlobLoader, RealDefaultsFitTheMeasuredClusters) {
   EXPECT_EQ(l.maxBufferBytes, 4u * 1024 * 1024);
 }
 #endif
+
+// --- ZimBrowser: title paging and article reads -------------------------------------------
+
+namespace {
+
+struct BrowserFixture {
+  explicit BrowserFixture(size_t pageSize = 40)
+      : source(buildZim(false)), loader(LoaderMemory::memory(), tinyLimits(256, 256, 4096)), browser(pageSize) {
+    LoaderMemory::reset();
+  }
+  MemorySource source;
+  zim::ZimBlobLoader loader;
+  zim::ZimBrowser browser;
+};
+
+std::vector<std::string> titlesOf(const zim::ZimBrowser& b) {
+  std::vector<std::string> out;
+  for (size_t i = 0; i < b.count(); ++i) out.push_back(b.title(i));
+  return out;
+}
+
+class NoDecoder : public zim::ClusterDecoder {
+ public:
+  int64_t decode(Compression, const uint8_t*, size_t, uint8_t*, size_t) override { return zim::DECODE_ERROR; }
+};
+
+}  // namespace
+
+TEST(ZimBrowser, FindsTheArticleNamespaceAndListsTitlesInOrder) {
+  BrowserFixture f;
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  EXPECT_EQ(f.browser.contentNamespace(), 'A');  // no 'C' entries in this archive
+  ASSERT_EQ(f.browser.search(""), Status::Ok);
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Aardvark", "Apple fruit", "Banana", "Berry", "Zebra"}));
+  EXPECT_FALSE(f.browser.hasMore());  // the 'M' entry is outside the article namespace
+}
+
+TEST(ZimBrowser, SearchStartsAtThePrefix) {
+  BrowserFixture f;
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  ASSERT_EQ(f.browser.search("B"), Status::Ok);
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Banana", "Berry", "Zebra"}));
+  ASSERT_EQ(f.browser.search("zzz"), Status::Ok);
+  EXPECT_EQ(f.browser.count(), 0u);
+}
+
+TEST(ZimBrowser, PagesThroughTheNamespace) {
+  BrowserFixture f(2);
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  ASSERT_EQ(f.browser.search(""), Status::Ok);
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Aardvark", "Apple fruit"}));
+  EXPECT_TRUE(f.browser.hasMore());
+  ASSERT_EQ(f.browser.nextPage(), Status::Ok);
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Banana", "Berry"}));
+  EXPECT_TRUE(f.browser.hasMore());
+  ASSERT_EQ(f.browser.nextPage(), Status::Ok);
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Zebra"}));
+  EXPECT_FALSE(f.browser.hasMore());
+  EXPECT_EQ(f.browser.nextPage(), Status::NotFound);
+}
+
+TEST(ZimBrowser, ReadsArticlesAndFollowsRedirects) {
+  BrowserFixture f;
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  ASSERT_EQ(f.browser.search(""), Status::Ok);
+  Blob blob;
+  std::string headword;
+  ASSERT_EQ(f.browser.readArticle(2, blob, headword), Status::Ok);  // Banana
+  EXPECT_EQ(text(blob), BANANA);
+  EXPECT_EQ(headword, "Banana");
+  ASSERT_EQ(f.browser.readArticle(3, blob, headword), Status::Ok);  // Berry -> Banana
+  EXPECT_EQ(text(blob), BANANA);
+  EXPECT_EQ(headword, "Banana");
+  ASSERT_EQ(f.browser.readArticle(0, blob, headword), Status::Ok);  // Aardvark is Cherry's title
+  EXPECT_EQ(text(blob), CHERRY);
+}
+
+TEST(ZimBrowser, RejectsNonHtmlAndOutOfRangeRows) {
+  BrowserFixture f;
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  ASSERT_EQ(f.browser.search(""), Status::Ok);
+  Blob blob;
+  std::string headword;
+  EXPECT_EQ(f.browser.readArticle(4, blob, headword), Status::Unsupported);  // Zebra is text/plain
+  EXPECT_EQ(f.browser.readArticle(5, blob, headword), Status::NotFound);
+}
+
+TEST(ZimBrowser, SearchAfterANewPageReusesTheTitleSlots) {
+  BrowserFixture f(2);
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  ASSERT_EQ(f.browser.search("Z"), Status::Ok);
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Zebra"}));
+  ASSERT_EQ(f.browser.search(""), Status::Ok);  // a shorter page must not leak old rows
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Aardvark", "Apple fruit"}));
+}

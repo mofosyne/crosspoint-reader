@@ -5,12 +5,14 @@ add_executable(ZimReaderTest
   ZimReaderTest.cpp
   ${REPO_ROOT}/lib/ZimReader/ZimReader.cpp
   ${REPO_ROOT}/lib/ZimZstd/ZimBlobLoader.cpp
+  ${REPO_ROOT}/lib/ZimBrowse/ZimBrowser.cpp
 )
 
 target_include_directories(ZimReaderTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${REPO_ROOT}/lib/ZimReader
   ${REPO_ROOT}/lib/ZimZstd
+  ${REPO_ROOT}/lib/ZimBrowse
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/freeink-sdk/libs/book/ContentProtection/include
 )
