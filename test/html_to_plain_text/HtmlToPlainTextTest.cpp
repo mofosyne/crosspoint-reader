@@ -76,4 +76,24 @@ TEST(HtmlToPlainText, SurvivesMalformedMarkup) {
   EXPECT_EQ(htmlToPlainText("<!-- comment -->kept", '\x01'), "kept");
 }
 
+TEST(HtmlToPlainText, DropsHeadStyleAndScriptContent) {
+  EXPECT_EQ(htmlToPlainText("<html><head><title>T</title><style>p { color: red; }</style></head>"
+                            "<body><p>Body text</p></body></html>",
+                            '\x01'),
+            "Body text");
+  EXPECT_EQ(htmlToPlainText("a<style>x{}</style>b<script src=\"x.js\">var a = 1 < 2;</script>c", '\x01'), "abc");
+  EXPECT_EQ(htmlToPlainText("<HEAD><STYLE>x</STYLE></HEAD>kept", '\x01'), "kept");
+}
+
+TEST(HtmlToPlainText, KeepsTextAroundHiddenElements) {
+  EXPECT_EQ(htmlToPlainText("one <style>hidden</style>two", '\x01'), "one two");
+  // Similar names are not hidden elements.
+  EXPECT_EQ(htmlToPlainText("<header>shown</header><scripture>too</scripture>", '\x01'), "showntoo");
+}
+
+TEST(HtmlToPlainText, UnclosedHiddenElementEndsTheText) {
+  EXPECT_EQ(htmlToPlainText("before<style>never closed", '\x01'), "before");
+  EXPECT_EQ(htmlToPlainText("before<script/>after", '\x01'), "beforeafter");  // self-closing: nothing to skip
+}
+
 }  // namespace

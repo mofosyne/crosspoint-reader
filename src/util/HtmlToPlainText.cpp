@@ -52,6 +52,38 @@ TagBreak tagBreak(const std::string& input, size_t start, size_t end) {
   return TagBreak::None;
 }
 
+// Elements whose content is not reading text: the document head (title, inline CSS), styles
+// and scripts. Returns the lower-case name of an opening tag, or nullptr for any other tag.
+const char* hiddenElementName(const std::string& input, size_t start, size_t end) {
+  if (start >= end || input[start] == '/' || input[end - 1] == '/') return nullptr;
+  size_t nameEnd = start;
+  while (nameEnd < end && std::isalnum(static_cast<unsigned char>(input[nameEnd]))) nameEnd++;
+  const size_t len = nameEnd - start;
+  for (const char* name : {"head", "style", "script"}) {
+    if (strlen(name) != len) continue;
+    size_t i = 0;
+    while (i < len && std::tolower(static_cast<unsigned char>(input[start + i])) == name[i]) i++;
+    if (i == len) return name;
+  }
+  return nullptr;
+}
+
+// Index just past the closing tag of `name` that follows `from`, or input.size() when absent.
+size_t skipPastClosingTag(const std::string& input, size_t from, const char* name) {
+  const size_t len = strlen(name);
+  for (size_t i = input.find("</", from); i != std::string::npos; i = input.find("</", i + 2)) {
+    size_t j = 0;
+    while (j < len && i + 2 + j < input.size() &&
+           std::tolower(static_cast<unsigned char>(input[i + 2 + j])) == name[j]) {
+      j++;
+    }
+    if (j != len) continue;
+    const size_t close = input.find('>', i + 2 + len);
+    return close == std::string::npos ? input.size() : close + 1;
+  }
+  return input.size();
+}
+
 void appendCodepoint(std::string& output, size_t& written, uint32_t codepoint) {
   if (codepoint == 0 || codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) return;
   if (codepoint <= 0x7F) {
@@ -119,6 +151,10 @@ std::string htmlToPlainText(std::string html, const char headingMarker) {
       const size_t close = html.find('>', i + 1);
       if (close == std::string::npos) {
         html[written++] = html[i++];
+        continue;
+      }
+      if (const char* hidden = hiddenElementName(html, i + 1, close)) {
+        i = skipPastClosingTag(html, close + 1, hidden);
         continue;
       }
       const TagBreak separator = tagBreak(html, i + 1, close);
