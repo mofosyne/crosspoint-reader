@@ -22,6 +22,11 @@
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
 #include "util/BookmarkUtil.h"
+#if CROSSPOINT_ZIM
+#include <ZimDevice.h>
+
+#include "activities/zim/ZimBrowseActivity.h"
+#endif
 
 namespace fui = freeink::ui;
 
@@ -135,6 +140,12 @@ void FileBrowserActivity::loadFiles() {
                  FsHelpers::hasImageExtension(filename)) {
         files.emplace_back(filename);
       }
+#if CROSSPOINT_ZIM
+      // ZIM archives need PSRAM for the decoded clusters; other boards do not list them.
+      else if (FsHelpers::hasZimExtension(filename) && zim::deviceSupportsZim()) {
+        files.emplace_back(filename);
+      }
+#endif
     }
   }
   root.close();
@@ -371,6 +382,13 @@ void FileBrowserActivity::activateSelected() {
   } else {
     const std::string fullPath = basepath + entry;
     lock.unlock();  // onSelectBook launches an activity; don't hold the lock across it
+#if CROSSPOINT_ZIM
+    if (FsHelpers::hasZimExtension(entry)) {
+      auto browse = makeUniqueNoThrow<ZimBrowseActivity>(renderer, mappedInput, fullPath);
+      if (browse) startActivityForResult(std::move(browse), [](const ActivityResult&) {});
+      return;
+    }
+#endif
     onSelectBook(fullPath);
   }
 }

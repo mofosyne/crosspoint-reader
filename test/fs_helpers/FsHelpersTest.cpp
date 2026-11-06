@@ -18,6 +18,14 @@ TEST(ReflowableBookExtension, IncludesTextFormatsAndExcludesImageBooks) {
   }
 }
 
+TEST(ZimExtension, MatchesOnlyZimFilesCaseInsensitively) {
+  EXPECT_TRUE(FsHelpers::hasZimExtension("wikipedia_en_all_mini_2024-04.zim"));
+  EXPECT_TRUE(FsHelpers::hasZimExtension("A.ZIM"));
+  EXPECT_FALSE(FsHelpers::hasZimExtension("book.epub"));
+  EXPECT_FALSE(FsHelpers::hasZimExtension("zim"));
+  EXPECT_FALSE(FsHelpers::hasZimExtension("archive.zim.part"));
+}
+
 TEST(IsSafePathComponent, AcceptsNamesWithRepeatedDots) {
   EXPECT_TRUE(FsHelpers::isSafePathComponent("volume..2.epub"sv));
   EXPECT_TRUE(FsHelpers::isSafePathComponent("notes...txt"sv));

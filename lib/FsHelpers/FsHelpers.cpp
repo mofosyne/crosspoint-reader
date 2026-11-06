@@ -184,6 +184,8 @@ bool hasReflowableBookExtension(std::string_view fileName) {
   return hasEpubExtension(fileName) || hasTxtExtension(fileName) || hasMarkdownExtension(fileName);
 }
 
+bool hasZimExtension(std::string_view fileName) { return checkFileExtension(fileName, ".zim"); }
+
 bool hasCssExtension(std::string_view fileName) { return checkFileExtension(fileName, ".css"); }
 
 std::string extractFolderPath(const std::string& filePath) {
