@@ -7,8 +7,10 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <esp_timer.h>
 
 #include <algorithm>
+#include <climits>
 
 #include "MappedInputManager.h"
 #include "activities/reader/DictionaryDefinitionActivity.h"
@@ -34,7 +36,7 @@ ZimBrowseActivity::ZimBrowseActivity(GfxRenderer& renderer, MappedInputManager& 
 
 void ZimBrowseActivity::onEnter() {
   UiListActivity::onEnter();
-  rowItems_.reserve(zim::ZimBrowser::DEFAULT_PAGE_SIZE + 2);  // Search row + page + Next row
+  rowItems_.reserve(zim::ZimBrowser::DEFAULT_PAGE_SIZE + 3);  // Search + page + Next + Benchmark
 
   decoder_ = makeUniqueNoThrow<zim::ZstdClusterDecoder>(zim::psramMemory());
   loader_ = makeUniqueNoThrow<zim::ZimBlobLoader>(zim::psramMemory());
@@ -90,6 +92,11 @@ void ZimBrowseActivity::rebuildRows() {
     next.actionValue = static_cast<int16_t>(rowItems_.size());
     rowItems_.push_back(next);
   }
+  fui::ListItem bench;
+  bench.label = tr(STR_ZIM_BENCHMARK);
+  bench.actionValue = static_cast<int16_t>(rowItems_.size());
+  benchmarkRow_ = static_cast<int>(rowItems_.size());
+  rowItems_.push_back(bench);
 }
 
 void ZimBrowseActivity::buildScreen(UiScreen& screen) {
@@ -118,6 +125,10 @@ void ZimBrowseActivity::activateIndex(const int index) {
   if (!ready_ || index < 0 || index >= listCount()) return;
   if (index == 0) {
     startSearch();
+    return;
+  }
+  if (index == benchmarkRow_) {
+    runBenchmark();
     return;
   }
   const size_t row = static_cast<size_t>(index) - 1;
@@ -183,16 +194,7 @@ void ZimBrowseActivity::openArticle(const size_t row) {
   const unsigned long readMs = millis() - t0;
 
   std::string text;
-  if (status == zim::Status::Ok) {
-    const size_t bytes = std::min(blob.size, MAX_ARTICLE_BYTES);
-    if (HalMemory::getDefaultHeap().largestBlockBytes < bytes + VIEWER_HEADROOM) {
-      LOG_ERR("ZIM", "Not enough heap for a %u byte article", static_cast<unsigned>(bytes));
-      status = zim::Status::OutOfMemory;
-    } else {
-      // htmlToPlainText reuses this buffer, so the article costs one allocation.
-      text.assign(reinterpret_cast<const char*>(blob.data), bytes);
-    }
-  }
+  if (status == zim::Status::Ok && !copyArticleHtml(blob, text)) status = zim::Status::OutOfMemory;
   loader_->release();  // the 2-3 MiB buffers are not needed while the article is on screen
   if (status != zim::Status::Ok) {
     LOG_ERR("ZIM", "Article row %u failed st=%d after %lu ms", static_cast<unsigned>(row), static_cast<int>(status),
@@ -223,6 +225,137 @@ void ZimBrowseActivity::openArticle(const size_t row) {
                                                                 std::move(text), /*htmlDefinition=*/false);
   if (!viewer) {
     LOG_ERR("ZIM", "OOM: article viewer");
+    return;
+  }
+  startActivityForResult(std::move(viewer), [](const ActivityResult&) {});
+}
+
+bool ZimBrowseActivity::copyArticleHtml(const zim::Blob& blob, std::string& out) const {
+  const size_t bytes = std::min(blob.size, MAX_ARTICLE_BYTES);
+  if (HalMemory::getDefaultHeap().largestBlockBytes < bytes + VIEWER_HEADROOM) {
+    LOG_ERR("ZIM", "Not enough heap for a %u byte article", static_cast<unsigned>(bytes));
+    return false;
+  }
+  // htmlToPlainText reuses this buffer, so the article costs one allocation.
+  out.assign(reinterpret_cast<const char*>(blob.data), bytes);
+  return true;
+}
+
+namespace {
+
+struct Series {
+  int64_t sum = 0;
+  int64_t min = INT64_MAX;
+  int64_t max = 0;
+  int count = 0;
+  void add(const int64_t v) {
+    sum += v;
+    min = std::min(min, v);
+    max = std::max(max, v);
+    ++count;
+  }
+  int64_t avg() const { return count ? sum / count : 0; }
+};
+
+// "12.3 ms" without floating-point printf.
+void formatMs(char* out, const size_t size, const int64_t micros) {
+  snprintf(out, size, "%lld.%lld ms", static_cast<long long>(micros / 1000),
+           static_cast<long long>((micros % 1000) / 100));
+}
+
+void appendLine(std::string& report, const char* label, const Series& series) {
+  char avg[24], low[24], high[24], line[128];
+  formatMs(avg, sizeof(avg), series.avg());
+  formatMs(low, sizeof(low), series.count ? series.min : 0);
+  formatMs(high, sizeof(high), series.max);
+  snprintf(line, sizeof(line), "%s: %s  (%s - %s)\n", label, avg, low, high);
+  report += line;
+}
+
+uint32_t nextRandom(uint32_t& state) {
+  state ^= state << 13;
+  state ^= state >> 17;
+  state ^= state << 5;
+  return state;
+}
+
+}  // namespace
+
+// Reads random articles and shows the timings in the viewer, so a slow step is visible on the
+// device without a serial cable. A developer diagnostic: the report text is English only.
+void ZimBrowseActivity::runBenchmark() {
+  constexpr int ARTICLES = 12;
+  const uint32_t total = browser_->entryCount();
+  if (total == 0) return;
+
+  Series jump, read, sd, toText;
+  uint64_t htmlBytes = 0, textBytes = 0, sdReads = 0;
+  int ok = 0;
+  uint32_t seed = 0xC0FFEEu;
+  for (int attempt = 0; attempt < ARTICLES * 4 && ok < ARTICLES; ++attempt) {
+    const uint32_t index = nextRandom(seed) % total;
+    int64_t t0 = esp_timer_get_time();
+    if (browser_->jumpTo(index) != zim::Status::Ok || browser_->count() == 0) continue;
+    const int64_t jumpUs = esp_timer_get_time() - t0;
+
+    zim::Blob blob;
+    std::string headword, text;
+    source_.resetStats();
+    t0 = esp_timer_get_time();
+    if (browser_->readArticle(0, blob, headword) != zim::Status::Ok) continue;
+    const int64_t readUs = esp_timer_get_time() - t0;
+    const auto readStats = source_.stats();
+    if (!copyArticleHtml(blob, text)) continue;
+    htmlBytes += text.size();
+    t0 = esp_timer_get_time();
+    text = htmlToPlainText(std::move(text), DICTIONARY_PLAIN_HEADWORD_MARKER);
+    const int64_t textUs = esp_timer_get_time() - t0;
+    textBytes += text.size();
+
+    jump.add(jumpUs);
+    read.add(readUs);
+    sd.add(readStats.micros);
+    sdReads += readStats.reads;
+    toText.add(textUs);
+    ++ok;
+    delay(1);
+  }
+  loader_->release();
+
+  std::string report;
+  char line[128];
+  char openBuf[24];
+  formatMs(openBuf, sizeof(openBuf), static_cast<int64_t>(openMs_) * 1000);
+  snprintf(line, sizeof(line), "%s\nOpen archive + first page: %s\nArticles read: %d of %d\n\n", title_.c_str(),
+           openBuf, ok, ARTICLES);
+  report += line;
+  if (ok > 0) {
+    appendLine(report, "Title lookup (random page)", jump);
+    appendLine(report, "Read article (find + SD + decode)", read);
+    appendLine(report, "  of which SD reads", sd);
+    appendLine(report, "HTML to text", toText);
+    snprintf(line, sizeof(line), "SD reads per article: %u\nHTML avg: %u B, text avg: %u B\n",
+             static_cast<unsigned>(sdReads / ok), static_cast<unsigned>(htmlBytes / ok),
+             static_cast<unsigned>(textBytes / ok));
+    report += line;
+  }
+  const auto internal = HalMemory::getInternalHeap();
+  const auto psram = HalMemory::getPsramHeap();
+  snprintf(line, sizeof(line), "Free internal: %u KB, PSRAM: %u KB\n", static_cast<unsigned>(internal.freeBytes / 1024),
+           static_cast<unsigned>(psram.freeBytes / 1024));
+  report += line;
+  LOG_INF("ZIM", "Benchmark:\n%s", report.c_str());
+
+  {  // The random jumps replaced the page; put the alphabetical start back.
+    RenderLock lock(*this);
+    browser_->search("");
+    rebuildRows();
+    nav.reset();
+  }
+  auto viewer = makeUniqueNoThrow<DictionaryDefinitionActivity>(
+      renderer, mappedInput, std::string(tr(STR_ZIM_BENCHMARK)), std::move(report), /*htmlDefinition=*/false);
+  if (!viewer) {
+    LOG_ERR("ZIM", "OOM: benchmark viewer");
     return;
   }
   startActivityForResult(std::move(viewer), [](const ActivityResult&) {});

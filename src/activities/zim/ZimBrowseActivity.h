@@ -31,6 +31,9 @@ class ZimBrowseActivity final : public UiListActivity {
   void applySearch(const std::string& query);
   void showNextPage();
   void openArticle(size_t row);
+  void runBenchmark();
+  // Copies the article HTML into `out` (cut at the size cap). False when the heap is too small.
+  bool copyArticleHtml(const zim::Blob& blob, std::string& out) const;
   // Rebuilds rowItems_ from the browser's current page. Call with the render lock held.
   void rebuildRows();
   void setStatus(const char* text);
@@ -39,6 +42,8 @@ class ZimBrowseActivity final : public UiListActivity {
   std::string title_;
   std::string status_;  // shown beside the Search row: last timing or last error
   bool ready_ = false;
+  int benchmarkRow_ = -1;
+  unsigned long openMs_ = 0;  // time to open the archive and load the first page
 
   zim::SdFileByteSource source_;
   std::unique_ptr<zim::ZstdClusterDecoder> decoder_;

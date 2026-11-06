@@ -28,8 +28,18 @@ class SdFileByteSource : public freeink::content::ByteSource {
   int32_t readAt(uint64_t offset, void* dst, uint32_t len) override;
   uint64_t size() const override { return file_ ? file_.fileSize64() : 0; }
 
+  // Read counters for benchmarks; reset() before the operation being measured.
+  struct Stats {
+    uint32_t reads = 0;
+    uint64_t bytes = 0;
+    int64_t micros = 0;
+  };
+  const Stats& stats() const { return stats_; }
+  void resetStats() { stats_ = Stats{}; }
+
  private:
   mutable HalFile file_;
+  Stats stats_;
 };
 
 }  // namespace zim

@@ -2,6 +2,7 @@
 
 #include <HalMemory.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 
 namespace zim {
 
@@ -23,8 +24,13 @@ bool SdFileByteSource::open(const std::string& path) {
 }
 
 int32_t SdFileByteSource::readAt(uint64_t offset, void* dst, uint32_t len) {
-  if (!file_ || !file_.seek64(offset)) return -1;
-  return file_.read(dst, len);
+  const int64_t start = esp_timer_get_time();
+  int32_t result = -1;
+  if (file_ && file_.seek64(offset)) result = file_.read(dst, len);
+  ++stats_.reads;
+  stats_.bytes += len;
+  stats_.micros += esp_timer_get_time() - start;
+  return result;
 }
 
 }  // namespace zim

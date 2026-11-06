@@ -1197,3 +1197,18 @@ TEST(ZimBrowser, SearchAfterANewPageReusesTheTitleSlots) {
   ASSERT_EQ(f.browser.search(""), Status::Ok);  // a shorter page must not leak old rows
   EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Aardvark", "Apple fruit"}));
 }
+
+TEST(ZimBrowser, JumpToLoadsAPageAtAnIndex) {
+  BrowserFixture f(2);
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  EXPECT_EQ(f.browser.entryCount(), 6u);
+  ASSERT_EQ(f.browser.jumpTo(2), Status::Ok);
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Banana", "Berry"}));
+  ASSERT_EQ(f.browser.jumpTo(4), Status::Ok);  // "Zebra" then the 'M' entry ends the namespace
+  EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Zebra"}));
+  ASSERT_EQ(f.browser.jumpTo(5), Status::Ok);  // the 'M' entry itself: not an article
+  EXPECT_EQ(f.browser.count(), 0u);
+  ASSERT_EQ(f.browser.jumpTo(99), Status::Ok);
+  EXPECT_EQ(f.browser.count(), 0u);
+}

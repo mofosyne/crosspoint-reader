@@ -22,6 +22,10 @@ class ZimBrowser {
 
   // Loads the first page of titles that sort at or after `prefix`.
   Status search(std::string_view prefix);
+  // Loads the page that starts at title-order index `titleIndex` (a random jump for benchmarks).
+  // An index past the namespace gives an empty page.
+  Status jumpTo(uint32_t titleIndex) { return loadPage(titleIndex); }
+  uint32_t entryCount() const { return reader_.entryCount(); }
   // Loads the page after the current one. NotFound when hasMore() is false. A full page that
   // ends exactly at the end of the namespace loads an empty next page (count() == 0).
   Status nextPage();
