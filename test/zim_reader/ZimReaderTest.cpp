@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "ZimBlobLoader.h"
 #include "ZimReader.h"
 
 #ifdef ZIM_TEST_HAVE_ZSTD
@@ -156,9 +157,9 @@ Bytes packCluster(const Bytes& body, bool useZstd) {
 // Redirect "Berry" (index 2) points at `berryTarget`.
 Bytes buildZim(bool useZstd, uint32_t berryTarget = 1, bool reverseDirents = false) {
   const std::vector<TestEntry> entries = {
-      {'A', "Apple", "Apple fruit", false, 0, 0, 0}, {'A', "Banana", "", false, 0, 0, 1},
+      {'A', "Apple", "Apple fruit", false, 0, 0, 0},    {'A', "Banana", "", false, 0, 0, 1},
       {'A', "Berry", "Berry", true, 0, berryTarget, 0}, {'A', "Cherry", "Aardvark", false, 0, 1, 0},
-      {'A', "Zebra", "Zebra", false, 1, 2, 0},       {'M', "Title", "", false, 1, 1, 1},
+      {'A', "Zebra", "Zebra", false, 1, 2, 0},          {'M', "Title", "", false, 1, 1, 1},
   };
   const std::vector<uint32_t> titleOrder = {3, 0, 1, 2, 4, 5};
 
@@ -298,8 +299,8 @@ TEST(ZimReader, FindsEveryEntryByPath) {
     char ns;
     const char* url;
     uint32_t index;
-  } cases[] = {{'A', "Apple", 0}, {'A', "Banana", 1}, {'A', "Berry", 2},
-               {'A', "Cherry", 3}, {'A', "Zebra", 4}, {'M', "Title", 5}};
+  } cases[] = {{'A', "Apple", 0},  {'A', "Banana", 1}, {'A', "Berry", 2},
+               {'A', "Cherry", 3}, {'A', "Zebra", 4},  {'M', "Title", 5}};
   for (const auto& c : cases) {
     Entry e;
     ASSERT_EQ(zr.findByPath(c.ns, c.url, e), Status::Ok) << c.url;
@@ -569,8 +570,8 @@ TEST(ZimRealFile, MainPageAndTitleSearch) {
   ASSERT_EQ(zr.readBlob(main.clusterNumber, main.blobNumber, dec, w, b), Status::Ok);
   EXPECT_GT(b.size, 0u);
   const std::string head(reinterpret_cast<const char*>(b.data), std::min<size_t>(b.size, 200));
-  printf("main page blob: %zu bytes, mime %s, starts: %.80s\n", b.size, std::string(zr.mimeType(main.mimeIndex)).c_str(),
-         head.c_str());
+  printf("main page blob: %zu bytes, mime %s, starts: %.80s\n", b.size,
+         std::string(zr.mimeType(main.mimeIndex)).c_str(), head.c_str());
 
   const std::string prefix = main.title.substr(0, std::min<size_t>(main.title.size(), 3));
   uint32_t idx = 0;
@@ -897,8 +898,8 @@ TEST(ZimRealFile, PathAndTitleSearchAgree) {
   ASSERT_TRUE(src.ok()) << file;
   ZimReader zr;
   ASSERT_EQ(zr.open(src), Status::Ok);
-  const char* paths[] = {"Albert_Einstein", "Paris", "Moon", "Zebra", "Python_(programming_language)", "Main_Page",
-                         "index"};
+  const char* paths[] = {"Albert_Einstein", "Paris", "Moon", "Zebra", "Python_(programming_language)",
+                         "Main_Page",       "index"};
   int checked = 0;
   for (const char* p : paths) {
     std::string title = p;
@@ -926,3 +927,171 @@ TEST(ZimRealFile, PathAndTitleSearchAgree) {
   }
   if (checked == 0) GTEST_SKIP() << "none of the sample articles are in this archive";
 }
+
+// --- ZimBlobLoader: buffer ownership and growth -----------------------------------------
+
+namespace {
+
+struct LoaderMemory {
+  static inline int live = 0;
+  static inline int allocations = 0;
+  static inline bool fail = false;
+  static void* allocate(size_t bytes) {
+    if (fail) return nullptr;
+    ++live;
+    ++allocations;
+    return malloc(bytes);
+  }
+  static void release(void* ptr) {
+    if (!ptr) return;
+    --live;
+    free(ptr);
+  }
+  static zim::ZimMemory memory() { return {allocate, release}; }
+  static void reset() { live = allocations = 0, fail = false; }
+};
+
+zim::ZimBlobLoader::Limits tinyLimits(size_t packed, size_t initialPlain, size_t cap) {
+  zim::ZimBlobLoader::Limits l;
+  l.packedBytes = packed;
+  l.initialPlainBytes = initialPlain;
+  l.maxBufferBytes = cap;
+  return l;
+}
+
+}  // namespace
+
+TEST(ZimBlobLoader, AllocatesNothingUntilTheFirstReadAndFreesEverything) {
+  LoaderMemory::reset();
+  {
+    zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(256, 256, 4096));
+    EXPECT_EQ(LoaderMemory::live, 0);
+    MemorySource src(buildZim(false));
+    ZimReader zr;
+    ASSERT_EQ(zr.open(src), Status::Ok);
+    Blob b;
+    ASSERT_EQ(loader.read(zr, nullptr, 1, 0, b), Status::Ok);
+    EXPECT_EQ(text(b), CHERRY);
+    EXPECT_EQ(LoaderMemory::live, 2);
+    loader.release();
+    EXPECT_EQ(LoaderMemory::live, 0);
+    EXPECT_EQ(loader.plainCapacity(), 0u);
+    ASSERT_EQ(loader.read(zr, nullptr, 1, 1, b), Status::Ok);  // usable again after release()
+    EXPECT_EQ(text(b), TITLE_TEXT);
+  }
+  EXPECT_EQ(LoaderMemory::live, 0);
+}
+
+TEST(ZimBlobLoader, GrowsThePlainBufferForAStoredBlob) {
+  LoaderMemory::reset();
+  zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(64, 4, 4096));
+  MemorySource src(buildZim(false));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  Blob b;
+  ASSERT_EQ(loader.read(zr, nullptr, 1, 0, b), Status::Ok);
+  EXPECT_EQ(text(b), CHERRY);
+  EXPECT_EQ(loader.plainCapacity(), CHERRY.size());  // sized to the blob, not to the cap
+  EXPECT_EQ(LoaderMemory::live, 2);                  // the old plain buffer was freed
+}
+
+TEST(ZimBlobLoader, RefusesAStoredBlobAboveTheCap) {
+  LoaderMemory::reset();
+  zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(64, 4, 8));
+  MemorySource src(buildZim(false));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  Blob b;
+  EXPECT_EQ(loader.read(zr, nullptr, 1, 0, b), Status::BufferTooSmall);  // 11 bytes, cap 8
+  EXPECT_EQ(loader.plainCapacity(), 4u);
+}
+
+TEST(ZimBlobLoader, ReportsAllocationFailureAndRecovers) {
+  LoaderMemory::reset();
+  zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(64, 64, 4096));
+  MemorySource src(buildZim(false));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  Blob b;
+  LoaderMemory::fail = true;
+  EXPECT_EQ(loader.read(zr, nullptr, 1, 0, b), Status::OutOfMemory);
+  EXPECT_EQ(LoaderMemory::live, 0);
+  LoaderMemory::fail = false;
+  EXPECT_EQ(loader.read(zr, nullptr, 1, 0, b), Status::Ok);
+}
+
+TEST(ZimBlobLoader, WithoutAnAllocatorItReportsOutOfMemory) {
+  zim::ZimBlobLoader loader(zim::ZimMemory{});
+  MemorySource src(buildZim(false));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  Blob b;
+  EXPECT_EQ(loader.read(zr, nullptr, 1, 0, b), Status::OutOfMemory);
+}
+
+TEST(ZimBlobLoader, PropagatesLookupErrorsWithoutRetrying) {
+  LoaderMemory::reset();
+  zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(64, 64, 4096));
+  MemorySource src(buildZim(false));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  Blob b;
+  EXPECT_EQ(loader.read(zr, nullptr, 1, 9, b), Status::NotFound);
+  EXPECT_EQ(loader.read(zr, nullptr, 9, 0, b), Status::NotFound);
+}
+
+#ifdef ZIM_TEST_HAVE_ZSTD
+TEST(ZimBlobLoader, GrowsThePlainBufferToTheCapForACompressedCluster) {
+  LoaderMemory::reset();
+  zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(256, 8, 4096));
+  MemorySource src(buildZim(true));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  ZstdDecoder decoder;
+  Blob b;
+  ASSERT_EQ(loader.read(zr, &decoder, 0, 0, b), Status::Ok);
+  EXPECT_EQ(text(b), APPLE);
+  EXPECT_EQ(loader.plainCapacity(), 4096u);  // decoded size is unknown, so it jumps to the cap
+  const int allocations = LoaderMemory::allocations;
+  ASSERT_EQ(loader.read(zr, &decoder, 0, 1, b), Status::Ok);  // no growth the second time
+  EXPECT_EQ(text(b), BANANA);
+  EXPECT_EQ(LoaderMemory::allocations, allocations);
+}
+
+TEST(ZimBlobLoader, GrowsThePackedBufferToTheClusterSize) {
+  LoaderMemory::reset();
+  zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(4, 256, 4096));
+  MemorySource src(buildZim(true));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  zim::ClusterInfo info;
+  ASSERT_EQ(zr.clusterInfo(0, info), Status::Ok);
+  ZstdDecoder decoder;
+  Blob b;
+  ASSERT_EQ(loader.read(zr, &decoder, 0, 0, b), Status::Ok);
+  EXPECT_EQ(text(b), APPLE);
+  EXPECT_EQ(loader.packedCapacity(), info.packedSize - 1);
+}
+
+TEST(ZimBlobLoader, GivesUpWhenTheCapIsTooSmallForTheCluster) {
+  LoaderMemory::reset();
+  zim::ZimBlobLoader loader(LoaderMemory::memory(), tinyLimits(256, 8, 16));
+  MemorySource src(buildZim(true));
+  ZimReader zr;
+  ASSERT_EQ(zr.open(src), Status::Ok);
+  ZstdDecoder decoder;
+  Blob b;
+  EXPECT_EQ(loader.read(zr, &decoder, 0, 0, b), Status::BufferTooSmall);
+  EXPECT_LE(loader.plainCapacity(), 16u);
+  EXPECT_EQ(LoaderMemory::live, 2);  // still owned by the loader, freed by its destructor
+}
+
+TEST(ZimBlobLoader, RealDefaultsFitTheMeasuredClusters) {
+  // 1 MiB packed and 2.5 MiB plain cover the 130-400 KB / 1.83-2.09 MB clusters measured on
+  // real archives, and the 4 MiB cap leaves room above that.
+  const zim::ZimBlobLoader::Limits l;
+  EXPECT_GE(l.packedBytes, 400u * 1024);
+  EXPECT_GE(l.initialPlainBytes, 2100u * 1000);
+  EXPECT_EQ(l.maxBufferBytes, 4u * 1024 * 1024);
+}
+#endif
