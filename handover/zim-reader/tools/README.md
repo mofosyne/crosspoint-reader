@@ -9,3 +9,6 @@ Run Python with `python3 -I script.py ...` (isolated mode) and keep archives in 
 - `xhtml_probe2.cpp.txt` (copy to `xhtml_probe2.cpp` to build): runs the repo's `writeNormalizedXhtml` (copied verbatim) plus expat on
   article HTML, with and without named entities resolved.
   Build: `g++ -std=c++20 -Ilib/Epub xhtml_probe2.cpp lib/Epub/Epub/htmlEntities.cpp -lexpat`
+- `zim_scan.py <folder> <out_prefix>`: scans every `*.zim` in a folder, writes `<out_prefix>.csv` and `.md`
+  (compression kinds, zstd window sizes, real decoded cluster sizes of up to 12 sampled clusters).
+- `zim_estimate.py <scan.csv> <out.md>`: typical and worst per-article time on the Sticky, from the scan CSV (model fitted to the benchmark).

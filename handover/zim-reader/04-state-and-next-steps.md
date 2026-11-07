@@ -87,3 +87,24 @@ card makes the benchmark skip itself.
 - The reviewers' deferred items for `ZimReader`: chunked cluster reads (wait for timing),
   caching a decoded cluster, `Entry` string copies, reading the info byte together with the
   cluster, and extra reads in the binary search.
+
+## Status 2026-11-07 (local, uncommitted at the time of writing)
+
+Done on the Sticky (tested on the device with the serial debug console):
+- `ZimArticleActivity`: PSRAM text, line table and link table; tappable underlined links; Contents list
+  (title-bar tap) with "Go to %"; loading popup; reader line spacing. Large articles no longer fail.
+- `htmlToPlainText`: `^` superscripts, `[image: alt]` / `[formula: ...]`, links reported as ranges,
+  infobox rows as "Label: value", navboxes, reflists, edit links and footnote markers dropped.
+- Title cleanup for archives that store escaped markup (`&lt;i&gt;Agathis&lt;/i&gt;`), main page row,
+  search tries "Moon" / "Moon Landing" spellings and then the article path.
+- Debug console (`-DCROSSPOINT_SERIAL_INPUT`, sticky env only): `CMD:SCREENSHOT`, `CMD:STATE`,
+  `CMD:DO:<cmd>` (ROW:n, SEARCH:text, MAIN, PAGE:n, LINK:i, HEADING:i, TEXT:s, SUBMIT, BACK ...),
+  `CMD:ZIM:<path>`, `CMD:TAP:nx,ny`, `CMD:BTN:<name>`. Skips the power-button wake check.
+
+Open:
+- Slow seeks on some files: the schools ZIM (1.3 GB) took 7.4 s to open and 8.4 s for a search (about
+  40 ms per read) while the mini ZIM needs about 1.4 ms per read. Likely a fragmented exFAT file
+  (FAT chain walked on every seek); a clean card with the largest files copied first should fix it.
+- Search suggestions while typing (needs a hook in `KeyboardEntryActivity`, which owns its layout).
+- Japanese text needs an SD font: copy `NotoSansCJK-Regular.ttc` to `/fonts/` on the card and select it.
+- Benchmark row still uses the old string path. Not yet run through `firmware-handoff`.

@@ -1,0 +1,22 @@
+Sticky (ESP32-S3, 8 MB PSRAM), env `sticky` with -DCROSSPOINT_ZIM=1, commit 2d6a448d.
+ZIM: wikipedia_en_all_mini_2024-04 on exFAT. User-pasted serial excerpt; the benchmark
+report was cut off at "of which" by interleaved log lines, so the breakdown is missing.
+
+[59673] [DBG] [GFX] Time = 25 ms from clearScreen to displayBuffer
+[60085] [INF] [MEM] Free: 207760 bytes, Total: 294412 bytes, Min Free: 207560 bytes, MaxAlloc: 155636 bytes
+[60085] [INF] [MEM] PSRAM: Free: 8238772 bytes, Total: 8388608 bytes, Min Free: 0 bytes, MaxAlloc: 8126452 bytes
+[67405] [INF] [ZIM] Benchmark:
+wikipedia_en_all_mini_2024-04
+Open archive + first page: 0.0 ms
+Articles read: 12 of 12
+
+Title lookup (random page): 75.2 ms  (73.8 ms - 76.2 ms)
+Read article (find + SD + decode): 330.6 ms  (317.0 ms - 339.7 ms)
+  of which [truncated]
+[67549] [DBG] [LOOP] New max loop duration: 5059 ms (activity: 5056 ms)
+[67568] [DBG] [FDC] Prewarm: 49 glyphs in 3462 bytes from 2 groups (0 missed)
+[67576] [DBG] [GFX] Time = 27 ms from clearScreen to displayBuffer
+[70099] [INF] [MEM] Free: 204272 bytes, Total: 294412 bytes, Min Free: 202680 bytes, MaxAlloc: 155636 bytes
+[70100] [INF] [MEM] PSRAM: Free: 8238772 bytes, Total: 8388608 bytes, Min Free: 0 bytes, MaxAlloc: 8126452 bytes
+... (identical MEM lines every 10 s through 220851; heap and PSRAM flat) ...
+[218117] [DBG] [GFX] Time = 22 ms from clearScreen to displayBuffer
