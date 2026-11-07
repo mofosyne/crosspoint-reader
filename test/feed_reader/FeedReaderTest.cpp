@@ -1,12 +1,17 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "CachedArticle.h"
+#include "CommentFeed.h"
+#include "ContentExtract.h"
 #include "FeedDate.h"
 #include "FeedParser.h"
-#include "CachedArticle.h"
-#include "ContentExtract.h"
+#include "HnComments.h"
 #include "LinkExtractor.h"
 #include "SeenSet.h"
 #include "SourcesFile.h"
@@ -19,7 +24,7 @@ TEST(FeedDate, ParsesRfc822) {
   EXPECT_EQ(parseFeedDate("6 Nov 2026 23:30 GMT"), 1794007800);
   EXPECT_EQ(parseFeedDate("Fri, 06 Nov 2026 18:30:52 EST"), 1794007852);  // 5 hours behind UTC
   EXPECT_EQ(parseFeedDate("Sat, 07 Nov 2026 00:30:52 +0100"), 1794007852);
-  EXPECT_EQ(parseFeedDate("Thu, 01 Jan 1970 00:00:00 GMT"), 0);  // the epoch itself reads as unknown
+  EXPECT_EQ(parseFeedDate("Thu, 01 Jan 1970 00:00:00 GMT"), 0);         // the epoch itself reads as unknown
   EXPECT_EQ(parseFeedDate("Fri, 06 Nov 26 23:30:52 GMT"), 1794007852);  // two-digit year
 }
 
@@ -45,7 +50,8 @@ static const char* HN_RSS =
     "<item><title>Libghostty 1.0</title><link>https://mitchellh.com/writing/libghostty-1-0</link>"
     "<pubDate>Fri, 06 Nov 2026 23:30:52 +0000</pubDate>"
     "<comments>https://news.ycombinator.com/item?id=50399933</comments>"
-    "<description><![CDATA[<a href=\"https://news.ycombinator.com/item?id=50399933\">Comments</a>]]></description></item>"
+    "<description><![CDATA[<a "
+    "href=\"https://news.ycombinator.com/item?id=50399933\">Comments</a>]]></description></item>"
     "<item><title>Second &amp; third</title><link>https://example.org/2</link>"
     "<guid isPermaLink=\"false\">abc-123</guid></item></channel></rss>";
 
@@ -108,7 +114,7 @@ TEST(FeedParser, ReadsAtomEntries) {
   EXPECT_EQ(items[0].commentsUrl, "https://blog.example/one#comments");
   EXPECT_EQ(items[0].published, 1793872800);  // <published> wins over <updated>
   EXPECT_EQ(items[0].summary, "About one");
-  EXPECT_EQ(items[1].published, 1794007852);  // only <updated>
+  EXPECT_EQ(items[1].published, 1794007852);   // only <updated>
   EXPECT_EQ(items[1].summary, "<p>body</p>");  // <content> wins over <summary>
 }
 
@@ -179,8 +185,8 @@ TEST(FeedParser, KeepsItemsBeforeAnXmlError) {
 
 TEST(FeedParser, CapsLongSummaries) {
   const std::string body(50000, 'x');
-  const std::string xml = "<rss><channel><item><link>https://e.org/a</link><description>" + body +
-                          "</description></item></channel></rss>";
+  const std::string xml =
+      "<rss><channel><item><link>https://e.org/a</link><description>" + body + "</description></item></channel></rss>";
   std::vector<FeedItem> items;
   FeedParser parser(
       [&](FeedItem& i) {
@@ -311,14 +317,14 @@ TEST(SourcesFile, DueLogic) {
   Source s;
   s.everyDays = 3;
   const int64_t day = 86400;
-  EXPECT_TRUE(isDue(s, 0, 1000 * day));                   // never checked
-  EXPECT_FALSE(isDue(s, 1000 * day, 1001 * day));          // one day ago
-  EXPECT_FALSE(isDue(s, 1000 * day, 1002 * day));          // two days ago
-  EXPECT_TRUE(isDue(s, 1000 * day, 1003 * day - 1800));    // within the hour of slack
+  EXPECT_TRUE(isDue(s, 0, 1000 * day));                  // never checked
+  EXPECT_FALSE(isDue(s, 1000 * day, 1001 * day));        // one day ago
+  EXPECT_FALSE(isDue(s, 1000 * day, 1002 * day));        // two days ago
+  EXPECT_TRUE(isDue(s, 1000 * day, 1003 * day - 1800));  // within the hour of slack
   EXPECT_TRUE(isDue(s, 1000 * day, 1005 * day));
-  EXPECT_TRUE(isDue(s, 1000 * day, 0));                    // clock unknown
+  EXPECT_TRUE(isDue(s, 1000 * day, 0));  // clock unknown
   s.everyDays = 0;
-  EXPECT_TRUE(isDue(s, 1000 * day, 1000 * day + 5));       // every sync
+  EXPECT_TRUE(isDue(s, 1000 * day, 1000 * day + 5));  // every sync
 }
 
 TEST(SeenSet, RemembersUrlsAndForgetsTheOldest) {
@@ -425,9 +431,12 @@ TEST(CachedArticle, DropsStaleLinkRanges) {
 
 TEST(ContentExtract, PrefersTheLargestArticle) {
   const std::string filler(300, 'x');
-  const std::string html = "<html><body><nav>menu</nav><article><h2>Teaser</h2></article>"
-                           "<article><h1>Real</h1><p>" + filler + "</p><article>nested</article></article>"
-                           "<footer>foot</footer></body></html>";
+  const std::string html =
+      "<html><body><nav>menu</nav><article><h2>Teaser</h2></article>"
+      "<article><h1>Real</h1><p>" +
+      filler +
+      "</p><article>nested</article></article>"
+      "<footer>foot</footer></body></html>";
   const auto main = extractMainContent(html);
   EXPECT_NE(main.find("Real"), std::string_view::npos);
   EXPECT_EQ(main.find("menu"), std::string_view::npos);
@@ -446,4 +455,131 @@ TEST(ContentExtract, FallsBackToMainThenIdThenBody) {
   const auto body = extractMainContent("<html><head><title>t</title></head><body><p>just text</p></body></html>");
   EXPECT_EQ(body, "<p>just text</p>");
   EXPECT_EQ(extractMainContent("plain text"), "plain text");
+}
+
+// ---- Hacker News comments (Algolia) -----------------------------------------------------------------
+
+namespace {
+// Algolia lists "children" before "text", and a reply nests inside its parent.
+const char* HN_JSON =
+    R"({"author":"op","children":[)"
+    R"({"author":"alice","children":[)"
+    R"({"author":"bob","children":[],"created_at_i":1000300,"id":12,"parent_id":11,"text":"<p>Deep reply &#x27;x&#x27;","type":"comment"})"
+    R"(],"created_at_i":1000100,"id":11,"parent_id":10,"text":"First<p>second <i>para</i>","type":"comment"},)"
+    R"({"author":null,"children":[],"created_at_i":1000200,"id":13,"parent_id":10,"text":null,"type":"comment"})"
+    R"(],"created_at_i":1000000,"id":10,"options":[],"points":5,"story_id":10,"text":null,"title":"Story","type":"story"})";
+
+std::string renderThread(const char* json, HnLimits limits, size_t feedStep, int64_t now, HnThread** keep = nullptr) {
+  static std::vector<char> pool(64 * 1024);
+  static std::vector<char> out(64 * 1024);
+  static std::unique_ptr<HnThread> thread;
+  thread = std::make_unique<HnThread>(pool.data(), pool.size(), limits);
+  const std::string_view all(json);
+  for (size_t i = 0; i < all.size(); i += feedStep) thread->feed(all.data() + i, std::min(feedStep, all.size() - i));
+  if (keep) *keep = thread.get();
+  return std::string(out.data(), thread->render(out.data(), out.size(), now));
+}
+}  // namespace
+
+TEST(HnComments, ApiUrl) {
+  std::string url;
+  EXPECT_TRUE(HnThread::apiUrlFor("https://news.ycombinator.com/item?id=50402535", url));
+  EXPECT_EQ(url, "https://hn.algolia.com/api/v1/items/50402535");
+  EXPECT_FALSE(HnThread::apiUrlFor("https://example.com/item?id=5", url));
+  EXPECT_FALSE(HnThread::apiUrlFor("https://news.ycombinator.com/item?id=", url));
+  EXPECT_FALSE(HnThread::apiUrlFor("https://news.ycombinator.com/news", url));
+}
+
+TEST(HnComments, RendersRepliesInReadingOrder) {
+  HnThread* t = nullptr;
+  const std::string html = renderThread(HN_JSON, {}, 7, 1000000 + 7200, &t);  // fed in 7-byte pieces
+  EXPECT_EQ(t->totalComments(), 3u);
+  EXPECT_EQ(t->keptComments(), 3u);
+  EXPECT_FALSE(t->failed());
+  const size_t alice = html.find("&gt; alice");
+  const size_t bob = html.find("&gt;&gt; bob");
+  const size_t deleted = html.find("&gt; [deleted]");
+  ASSERT_NE(alice, std::string::npos);
+  ASSERT_NE(bob, std::string::npos);
+  ASSERT_NE(deleted, std::string::npos);
+  EXPECT_LT(alice, bob);    // a reply follows its parent...
+  EXPECT_LT(bob, deleted);  // ...and comes before the next top-level comment
+  EXPECT_NE(html.find("First<p>second <i>para</i>"), std::string::npos);
+  EXPECT_NE(html.find("[no text]"), std::string::npos);
+  EXPECT_NE(html.find("</b> 1h"), std::string::npos);  // alice: 100 s after the story, now is 7200 s later
+}
+
+TEST(HnComments, LimitsCountTheRest) {
+  HnLimits limits;
+  limits.maxComments = 2;
+  HnThread* t = nullptr;
+  const std::string html = renderThread(HN_JSON, limits, 4096, 0, &t);
+  EXPECT_EQ(t->totalComments(), 3u);
+  EXPECT_EQ(t->keptComments(), 2u);
+  EXPECT_NE(html.find("[1 more comments not shown]"), std::string::npos);
+  EXPECT_NE(html.find("bob"), std::string::npos);  // bob's parent was cut: bob is shown at top level
+}
+
+TEST(HnComments, TruncatesLongTextOnACharacterBoundary) {
+  const std::string text = std::string(10, 'a') + "\\u00e9\\u00e9\\u00e9";  // 10 bytes + three 2-byte characters
+  const std::string json =
+      R"({"author":"op","children":[{"author":"x","children":[],"created_at_i":5,"id":2,"parent_id":1,"text":")" +
+      text + R"(","type":"comment"}],"id":1,"type":"story"})";
+  HnLimits limits;
+  limits.maxCommentBytes = 11;  // would split the first é
+  const std::string html = renderThread(json.c_str(), limits, 4096, 0);
+  ASSERT_GE(html.size(), 10u);
+  EXPECT_EQ(html.substr(html.size() - 10), "aaaaaaaaaa") << html;  // cut at 10 bytes, no half character
+}
+
+TEST(HnComments, BrokenJsonKeepsWhatWasRead) {
+  HnThread* t = nullptr;
+  renderThread(R"({"author":"op","children":[{"author":"x","children":[],"id":2,"parent_id":1,"text":"hi"},{"aut)", {},
+               4096, 0, &t);
+  EXPECT_EQ(t->keptComments(), 1u);
+  EXPECT_FALSE(t->failed());
+}
+
+// ---- WordPress comment feeds --------------------------------------------------------------------------
+
+TEST(CommentFeed, UrlForPostsWhoseCommentsAreOnThePage) {
+  std::string url;
+  EXPECT_TRUE(commentFeedUrlFor("https://hackaday.com/2026/11/07/post/",
+                                "https://hackaday.com/2026/11/07/post/#comments", url));
+  EXPECT_EQ(url, "https://hackaday.com/2026/11/07/post/feed/");
+  EXPECT_TRUE(
+      commentFeedUrlFor("https://blog.example/post", "https://blog.example/post#respond", url));  // no trailing slash
+  EXPECT_EQ(url, "https://blog.example/post/feed/");
+  EXPECT_TRUE(commentFeedUrlFor("https://blog.example/post/", "https://blog.example/post/", url));  // same URL
+  EXPECT_FALSE(commentFeedUrlFor("https://blog.example/post/", "https://forum.example/thread/1", url));
+  EXPECT_FALSE(commentFeedUrlFor("https://blog.example/?p=12", "https://blog.example/?p=12#comments", url));
+}
+
+TEST(CommentFeed, RendersCommentsFromAWordPressFeed) {
+  const char* xml =
+      R"(<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>Comments on: Post</title>)"
+      R"(<item><title>By: Ostracus</title><link>https://h.example/p/#comment-1</link><dc:creator><![CDATA[Ostracus]]></dc:creator>)"
+      R"(<pubDate>Sat, 07 Nov 2026 13:37:26 +0000</pubDate><description><![CDATA[Bang for the buck.]]></description></item>)"
+      R"(<item><title>By: Jo</title><link>https://h.example/p/#comment-2</link><pubDate>Sat, 07 Nov 2026 14:37:26 +0000</pubDate>)"
+      R"(<description><![CDATA[<p>Agreed</p>]]></description></item></channel></rss>)";
+  std::vector<char> buf(4096);
+  CommentFeedRenderer renderer(buf.data(), buf.size(), 1794058646 + 3 * 3600 + 30);
+  FeedParser parser([&](FeedItem& item) { return renderer.add(item); }, 2048);
+  parser.feed(xml, strlen(xml), true);
+  const std::string html(buf.data(), renderer.size());
+  EXPECT_EQ(renderer.count(), 2u);
+  EXPECT_NE(html.find("<p><b>&gt; Ostracus</b> 3h</p>Bang for the buck."), std::string::npos) << html;
+  EXPECT_NE(html.find("<p><b>&gt; Jo</b> 2h</p><p>Agreed</p>"), std::string::npos) << html;
+}
+
+TEST(CommentFeed, StopsAtTheLimit) {
+  std::vector<char> buf(4096);
+  CommentFeedRenderer renderer(buf.data(), buf.size(), 0, 2);
+  FeedItem c;
+  c.title = "By: A";
+  c.summary = "x";
+  EXPECT_TRUE(renderer.add(c));
+  EXPECT_TRUE(renderer.add(c));
+  EXPECT_FALSE(renderer.add(c));
+  EXPECT_EQ(renderer.count(), 2u);
 }

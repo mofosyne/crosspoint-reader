@@ -1,8 +1,9 @@
 #include "FeedSync.h"
 
 #include <Arduino.h>
+#include <CommentFeed.h>
 #include <ContentExtract.h>
-#include "network/HttpDownloader.h"
+#include <HnComments.h>
 #include <LinkExtractor.h>
 #include <Logging.h>
 #include <WiFi.h>
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <ctime>
 
+#include "network/HttpDownloader.h"
 #include "util/Dictionary.h"
 #include "util/HtmlToPlainText.h"
 
@@ -20,9 +22,24 @@ namespace {
 constexpr const char* TAG = "FEED";
 constexpr size_t FETCH_CAP = 1536 * 1024;  // a page body beyond this is cut
 constexpr size_t WORK_CAP = 1536 * 1024;   // converted text of one article
-constexpr size_t MIN_FEED_TEXT = 800;       // content=auto: a shorter feed text means "fetch the page"
+constexpr size_t MIN_FEED_TEXT = 800;      // content=auto: a shorter feed text means "fetch the page"
 constexpr size_t FEED_SUMMARY_CAP = 40 * 1024;
-constexpr size_t COMMENTS_CAP = 256 * 1024;  // text taken from a comments page
+constexpr unsigned long HN_DEADLINE_MS = 60000;     // the comment JSON of a busy story is large
+constexpr size_t COMMENT_TEXT_CAP = 4096;           // text kept per comment of a comment feed
+constexpr size_t COMMENTS_CAP = 256 * 1024;         // text taken from a comments page
+constexpr unsigned long FETCH_DEADLINE_MS = 30000;  // a slower page is given up on
+
+// Links to files that are not web pages (a PDF would only become junk text).
+bool isBinaryUrl(const std::string& url) {
+  std::string path = url.substr(0, url.find_first_of("?#"));
+  for (char& c : path) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+  for (const char* ext : {".pdf", ".zip", ".gz", ".tar", ".epub", ".mp3", ".mp4", ".webm", ".png", ".jpg", ".jpeg",
+                          ".gif", ".webp", ".iso", ".dmg", ".exe"}) {
+    const size_t n = strlen(ext);
+    if (path.size() > n && path.compare(path.size() - n, n, ext) == 0) return true;
+  }
+  return false;
+}
 
 // Collects the links of one conversion, resolved against the page they came from.
 class Links final : public LinkSink {
@@ -46,7 +63,10 @@ int64_t nowSeconds() {
   return t > 1700000000 ? static_cast<int64_t>(t) : 0;  // before about 2023 the clock was never set
 }
 
-bool tlsHeapOk() { return ESP.getFreeHeap() >= HttpDownloader::MIN_TLS_FREE_HEAP && ESP.getMaxAllocHeap() >= HttpDownloader::MIN_TLS_MAX_ALLOC; }
+bool tlsHeapOk() {
+  return ESP.getFreeHeap() >= HttpDownloader::MIN_TLS_FREE_HEAP &&
+         ESP.getMaxAllocHeap() >= HttpDownloader::MIN_TLS_MAX_ALLOC;
+}
 
 }  // namespace
 
@@ -85,6 +105,7 @@ bool FeedSync::step() {
     if (current_ >= due_.size()) {
       status_.finished = true;
       status_.headline = "Done";
+      if (status_.failed == 0) status_.detail.clear();  // a note about an earlier skipped item is stale now
       return false;
     }
     startSource(current_);
@@ -145,15 +166,22 @@ void FeedSync::checkSource() {
 bool FeedSync::fetchToBuffer(const std::string& url, std::string_view& body) {
   size_t len = 0;
   uint8_t* buf = fetchBuf_.get();
+  const unsigned long start = millis();
+  bool timedOut = false;
   const bool ok = HttpDownloader::fetchUrl(url, [&](const uint8_t* data, size_t n) {
+    if (millis() - start > FETCH_DEADLINE_MS) {
+      timedOut = true;
+      return false;
+    }
     const size_t room = fetchCap_ - len;
     memcpy(buf + len, data, std::min(n, room));
     len += std::min(n, room);
     return true;  // a body past the cap is dropped, not an error
   });
   body = std::string_view(reinterpret_cast<const char*>(buf), len);
-  if (!ok) {
-    status_.detail = "HTTP " + std::to_string(HttpDownloader::lastStatus()) + " " + url.substr(0, 60);
+  if (!ok || timedOut) {
+    status_.detail = timedOut ? "Too slow " + url.substr(0, 60)
+                              : "HTTP " + std::to_string(HttpDownloader::lastStatus()) + " " + url.substr(0, 60);
     return false;
   }
   if (len >= 2 && buf[0] == 0x1f && buf[1] == 0x8b) {
@@ -174,8 +202,8 @@ void FeedSync::checkFeed(const feed::Source& source) {
         if (considered++ >= static_cast<size_t>(source.limit)) return false;
         if (state_.seen.contains(item.url)) return true;
         const bool longEnough = item.summary.size() >= MIN_FEED_TEXT;
-        const bool useFeedText = source.content == feed::ContentMode::Feed ||
-                                 (source.content == feed::ContentMode::Auto && longEnough);
+        const bool useFeedText =
+            source.content == feed::ContentMode::Feed || (source.content == feed::ContentMode::Auto && longEnough);
         Pending p{item.url, item.title, item.commentsUrl, item.published};
         if (useFeedText && !item.summary.empty() && source.comments == feed::CommentsMode::None) {
           if (saveItem(source, p, item.summary, /*fragment=*/true)) state_.seen.add(item.url);
@@ -275,11 +303,19 @@ void FeedSync::readPending() {
     return;
   }
   std::string_view page;
-  if (!fetchToBuffer(item.url, page)) {
+  std::string note;  // stands in for the page when it can't be read but there are comments to keep
+  if (isBinaryUrl(item.url)) {
+    note = "<p>This link is a file, not a web page: " + item.url + "</p>";
+  } else if (!fetchToBuffer(item.url, page)) {
+    note = "<p>The page could not be fetched (" + status_.detail + "). Link: " + item.url + "</p>";
+  }
+  const bool hasComments = source.comments == feed::CommentsMode::Link && !item.commentsUrl.empty();
+  if (!note.empty() && !hasComments) {
+    if (isBinaryUrl(item.url)) state_.seen.add(item.url);  // nothing to retry
     ++status_.failed;
     return;
   }
-  const std::string_view main = feed::extractMainContent(page);
+  const std::string_view main = note.empty() ? feed::extractMainContent(page) : std::string_view(note);
   if (saveItem(source, item, main, /*fragment=*/false)) {
     state_.seen.add(item.url);
   } else {
@@ -289,6 +325,79 @@ void FeedSync::readPending() {
 
 // Converts `html` (a page's main content or a feed's own text) and the comments page, if wanted, and
 // writes the article. The title becomes a heading at the top.
+// Hacker News comments from the Algolia API: threaded, with authors and ages. Returns false when the
+// item is not an HN link or the request fails, so the caller can fall back to the comments page.
+bool FeedSync::appendHnComments(const Pending& item, char* work, size_t& used,
+                                std::vector<feed::CachedArticle::Link>& links) {
+  std::string apiUrl;
+  if (!feed::HnThread::apiUrlFor(item.commentsUrl, apiUrl)) return false;
+  // fetchBuf_ holds the page only until saveItem has copied it, so it is free to hold comment texts.
+  feed::HnThread thread(reinterpret_cast<char*>(fetchBuf_.get()), fetchCap_);
+  const unsigned long start = millis();
+  bool timedOut = false;
+  const bool ok = HttpDownloader::fetchUrl(apiUrl, [&](const uint8_t* data, size_t n) {
+    if (millis() - start > HN_DEADLINE_MS) {
+      timedOut = true;
+      return false;
+    }
+    thread.feed(reinterpret_cast<const char*>(data), n);
+    return true;
+  });
+  if ((!ok && thread.keptComments() == 0) || timedOut || thread.failed()) {
+    LOG_ERR(TAG, "Algolia comments failed for %s", apiUrl.c_str());
+    return false;
+  }
+  if (thread.keptComments() == 0) return true;  // no comments yet
+
+  char heading[48];
+  const int headingLen = snprintf(heading, sizeof(heading), "\n%cComments (%u)\n", DICTIONARY_PLAIN_HEADWORD_MARKER,
+                                  static_cast<unsigned>(thread.totalComments()));
+  memcpy(work + used, heading, static_cast<size_t>(headingLen));
+  used += static_cast<size_t>(headingLen);
+  const size_t room = std::min(workCap_ - used - 1, COMMENTS_CAP);
+  const size_t htmlLen = thread.render(work + used, room, now_);
+  Links commentLinks(item.commentsUrl, used);
+  used += htmlToPlainTextInPlace(work + used, htmlLen, DICTIONARY_PLAIN_HEADWORD_MARKER, &commentLinks, true);
+  for (auto& l : commentLinks.links) links.push_back(std::move(l));
+  return true;
+}
+
+// Comments from a WordPress-style comment feed (<post URL>/feed/), flat and in time order. A site
+// without such a feed just ends up with no comments section.
+void FeedSync::appendCommentFeed(const std::string& feedUrl, const Pending& item, char* work, size_t& used,
+                                 std::vector<feed::CachedArticle::Link>& links) {
+  constexpr size_t HEADING_ROOM = 48;
+  char* html = work + used + HEADING_ROOM;
+  const size_t room = std::min(workCap_ - used - HEADING_ROOM - 1, COMMENTS_CAP);
+  feed::CommentFeedRenderer renderer(html, room, now_);
+  feed::FeedParser parser([&](feed::FeedItem& comment) { return renderer.add(comment); }, COMMENT_TEXT_CAP);
+  const unsigned long start = millis();
+  HttpDownloader::fetchUrl(feedUrl, [&](const uint8_t* data, size_t n) {
+    if (millis() - start > FETCH_DEADLINE_MS) return false;
+    return parser.feed(reinterpret_cast<const char*>(data), n);
+  });
+  parser.feed("", 0, true);
+  if (renderer.count() == 0) {
+    LOG_INF(TAG, "No comments from %s", feedUrl.c_str());
+    return;
+  }
+  Links commentLinks(item.url, 0);
+  const size_t textLen =
+      htmlToPlainTextInPlace(html, renderer.size(), DICTIONARY_PLAIN_HEADWORD_MARKER, &commentLinks, true);
+  char heading[HEADING_ROOM];
+  const int headingLen = snprintf(heading, sizeof(heading), "\n%cComments (%u)\n", DICTIONARY_PLAIN_HEADWORD_MARKER,
+                                  static_cast<unsigned>(renderer.count()));
+  memmove(work + used + headingLen, html, textLen);  // close the gap the heading leaves
+  memcpy(work + used, heading, static_cast<size_t>(headingLen));
+  const size_t textStart = used + static_cast<size_t>(headingLen);
+  for (auto& l : commentLinks.links) {
+    l.start += static_cast<uint32_t>(textStart);
+    l.end += static_cast<uint32_t>(textStart);
+    links.push_back(std::move(l));
+  }
+  used = textStart + textLen;
+}
+
 bool FeedSync::saveItem(const feed::Source& source, const Pending& item, std::string_view html, bool fragment) {
   (void)fragment;
   if (html.empty()) return false;
@@ -312,11 +421,19 @@ bool FeedSync::saveItem(const feed::Source& source, const Pending& item, std::st
   used += bodyLen;
 
   // Comments: a second page, taken as text under its own heading.
-  if (source.comments == feed::CommentsMode::Link && !item.commentsUrl.empty() && item.commentsUrl != item.url &&
-      used + 4096 < workCap_ && tlsHeapOk()) {
+  if (source.comments == feed::CommentsMode::Link && !item.commentsUrl.empty() && used + 4096 < workCap_ &&
+      tlsHeapOk()) {
     std::string_view commentsPage;
-    if (fetchToBuffer(item.commentsUrl, commentsPage) && !commentsPage.empty()) {
-      const char* heading = "\n\x01""Comments\n";
+    std::string commentFeedUrl;
+    if (appendHnComments(item, work, used, links.links)) {
+      // Hacker News: the threaded comments came from the Algolia API.
+    } else if (feed::commentFeedUrlFor(item.url, item.commentsUrl, commentFeedUrl)) {
+      // The comments are on the article page itself: only the post's comment feed can supply them.
+      appendCommentFeed(commentFeedUrl, item, work, used, links.links);
+    } else if (fetchToBuffer(item.commentsUrl, commentsPage) && !commentsPage.empty()) {
+      const char* heading =
+          "\n\x01"
+          "Comments\n";
       const size_t headingLen = strlen(heading);
       memcpy(work + used, heading, headingLen);
       used += headingLen;

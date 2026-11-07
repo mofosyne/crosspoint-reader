@@ -7,6 +7,9 @@ add_executable(FeedReaderTest
   ${REPO_ROOT}/lib/FeedReader/SeenSet.cpp
   ${REPO_ROOT}/lib/FeedReader/CachedArticle.cpp
   ${REPO_ROOT}/lib/FeedReader/ContentExtract.cpp
+  ${REPO_ROOT}/lib/FeedReader/HnComments.cpp
+  ${REPO_ROOT}/lib/FeedReader/CommentFeed.cpp
+  ${REPO_ROOT}/freeink-sdk/libs/network/JsonSax/src/StreamingJsonParser.cpp
   ${REPO_ROOT}/lib/expat/xmlparse.c
   ${REPO_ROOT}/lib/expat/xmlrole.c
   ${REPO_ROOT}/lib/expat/xmltok.c
@@ -15,6 +18,7 @@ add_executable(FeedReaderTest
 target_include_directories(FeedReaderTest PRIVATE
   ${REPO_ROOT}/lib/FeedReader
   ${REPO_ROOT}/lib/expat
+  ${REPO_ROOT}/freeink-sdk/libs/network/JsonSax/include
 )
 
 target_compile_definitions(FeedReaderTest PRIVATE

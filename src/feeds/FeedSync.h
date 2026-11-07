@@ -22,8 +22,8 @@ class FeedSync {
     std::string detail;    // last problem or note
     size_t sourcesDone = 0;
     size_t sourcesTotal = 0;
-    size_t saved = 0;    // articles written this run
-    size_t failed = 0;   // items that could not be fetched or saved (retried next sync)
+    size_t saved = 0;   // articles written this run
+    size_t failed = 0;  // items that could not be fetched or saved (retried next sync)
     bool finished = false;
   };
 
@@ -53,6 +53,9 @@ class FeedSync {
   void checkSitemap(const feed::Source& source, const std::string& url, int depth);
   bool fetchToBuffer(const std::string& url, std::string_view& body);
   bool saveItem(const feed::Source& source, const Pending& item, std::string_view html, bool fragment);
+  bool appendHnComments(const Pending& item, char* work, size_t& used, std::vector<feed::CachedArticle::Link>& links);
+  void appendCommentFeed(const std::string& feedUrl, const Pending& item, char* work, size_t& used,
+                         std::vector<feed::CachedArticle::Link>& links);
   void readPending();
 
   bool checkAll_;
@@ -68,7 +71,7 @@ class FeedSync {
 
   HalMemory::PsramBuffer fetchBuf_;  // page bodies
   size_t fetchCap_ = 0;
-  HalMemory::PsramBuffer workBuf_;   // the article text being built
+  HalMemory::PsramBuffer workBuf_;  // the article text being built
   size_t workCap_ = 0;
 };
 

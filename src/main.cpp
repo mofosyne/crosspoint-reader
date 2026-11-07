@@ -929,6 +929,14 @@ static void handleCommand(const String& cmd) {
     sendDebugText("DO", ok ? "ok" : "nothing to remove");
     return;
   }
+  if (cmd == "SRCSAVE" || cmd == "SRCRESTORE") {  // keep the real sources file safe from a test run
+    const char* backup = "/feeds/sources.bak";
+    const bool save = cmd == "SRCSAVE";
+    const String data = Storage.readFile(save ? feeds::SOURCES_PATH : backup);
+    const bool ok = (save || data.length() > 0) && Storage.writeFile(save ? backup : feeds::SOURCES_PATH, data);
+    sendDebugText("DO", ok ? "ok" : "failed");
+    return;
+  }
   if (cmd.startsWith("SRC:")) {  // append a line to /feeds/sources.txt; SRC:CLEAR empties the file
     Storage.ensureDirectoryExists("/feeds");
     String content = cmd == "SRC:CLEAR" ? String() : Storage.readFile(feeds::SOURCES_PATH) + cmd.substring(4) + "\n";

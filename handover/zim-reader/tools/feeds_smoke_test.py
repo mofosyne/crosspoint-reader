@@ -21,6 +21,7 @@ class FeedsSmoke(unittest.TestCase):
     def setUpClass(cls):
         cls.dev = Sticky()
         cls.dev.wait_ready()
+        cls.cmd("SRCSAVE")  # the test replaces sources.txt; tearDown puts yours back
         cls.cmd("FEEDSRESET", 1.5)
         cls.cmd("SRC:CLEAR")
         for line in SOURCES:
@@ -29,6 +30,7 @@ class FeedsSmoke(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.cmd("SRCRESTORE")
         cls.dev.close()
 
     @classmethod
