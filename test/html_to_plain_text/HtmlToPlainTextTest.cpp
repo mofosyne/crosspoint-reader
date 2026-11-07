@@ -224,4 +224,15 @@ TEST(HtmlToPlainText, LabelCellWithABlockStillJoinsItsValue) {
             "Mean radius: 1737.4 km");
 }
 
+TEST(HtmlToPlainText, PageChromeIsDroppedOnRequest) {
+  const std::string html =
+      "<nav><a href=\"/\">Home</a></nav><p>Body text</p><aside>ads</aside><form><input></form><footer>(c)</footer>";
+  std::string withChrome = html;
+  withChrome.resize(htmlToPlainTextInPlace(withChrome.data(), withChrome.size(), '\x01', nullptr, false));
+  EXPECT_NE(withChrome.find("Home"), std::string::npos);  // the default keeps it
+  std::string without = html;
+  without.resize(htmlToPlainTextInPlace(without.data(), without.size(), '\x01', nullptr, true));
+  EXPECT_EQ(without, "Body text");
+}
+
 }  // namespace

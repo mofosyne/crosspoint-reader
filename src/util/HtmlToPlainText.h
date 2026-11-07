@@ -23,4 +23,7 @@ class LinkSink {
 // Same conversion on a caller-owned buffer, in place. Returns the text length (the text starts at
 // `buffer`). The caller may pass a PSRAM buffer so a large article never needs internal RAM.
 // When `links` is set, every <a href> is reported with offsets into the returned text.
-size_t htmlToPlainTextInPlace(char* buffer, size_t size, char headingMarker, LinkSink* links = nullptr);
+// With `dropPageChrome` the elements that are page furniture on a web page (nav, aside, footer, form,
+// button, svg, noscript, iframe) are removed whatever their class.
+size_t htmlToPlainTextInPlace(char* buffer, size_t size, char headingMarker, LinkSink* links = nullptr,
+                              bool dropPageChrome = false);

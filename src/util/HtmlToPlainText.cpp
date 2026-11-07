@@ -219,7 +219,12 @@ size_t skipElement(std::string_view input, size_t from, const char* name) {
 
 // Elements that are navigation or page furniture rather than reading text, found by class:
 // navigation boxes, reference lists, edit links and inline footnote markers.
-const char* noiseElementName(std::string_view input, size_t start, size_t end) {
+const char* noiseElementName(std::string_view input, size_t start, size_t end, bool dropPageChrome) {
+  if (dropPageChrome) {
+    for (const char* name : {"nav", "aside", "footer", "form", "button", "svg", "noscript", "iframe"}) {
+      if (isOpeningTag(input, start, end, name)) return name;
+    }
+  }
   for (const char* name : {"div", "table", "span", "ul", "section", "nav", "aside"}) {
     if (!isOpeningTag(input, start, end, name)) continue;
     const std::string_view cls = attributeValue(input, start, end, "class");
@@ -315,7 +320,8 @@ void appendBreak(char* output, size_t& written, size_t count = 1) {
 
 }  // namespace
 
-size_t htmlToPlainTextInPlace(char* buffer, const size_t size, const char headingMarker, LinkSink* links) {
+size_t htmlToPlainTextInPlace(char* buffer, const size_t size, const char headingMarker, LinkSink* links,
+                              const bool dropPageChrome) {
   // Compact into consumed input bytes; replacements never expand the source. `html` reads ahead
   // of `written`, and both view the same buffer.
   const std::string_view html(buffer, size);
@@ -346,7 +352,7 @@ size_t htmlToPlainTextInPlace(char* buffer, const size_t size, const char headin
         links->onLink(std::min(linkStart, written), written, linkHref);
         linkOpen = false;
       }
-      if (const char* noise = noiseElementName(html, i + 1, close)) {
+      if (const char* noise = noiseElementName(html, i + 1, close, dropPageChrome)) {
         i = skipElement(html, close + 1, noise);
         continue;
       }
