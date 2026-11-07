@@ -12,3 +12,6 @@ Run Python with `python3 -I script.py ...` (isolated mode) and keep archives in 
 - `zim_scan.py <folder> <out_prefix>`: scans every `*.zim` in a folder, writes `<out_prefix>.csv` and `.md`
   (compression kinds, zstd window sizes, real decoded cluster sizes of up to 12 sampled clusters).
 - `zim_estimate.py <scan.csv> <out.md>`: typical and worst per-article time on the Sticky, from the scan CSV (model fitted to the benchmark).
+- `sticky_console.py`: library, CLI and web GUI for the debug firmware (`CROSSPOINT_SERIAL_INPUT`): screenshot, `STATE` text, `DO:` commands, taps and buttons. `serve` opens a page with the live screen (click to tap), buttons and a command box.
+- `zim_smoke_test.py`: on-device unittest for the ZIM reader built on `sticky_console.py` (`python3 -m unittest -v zim_smoke_test`).
+- `feeds_smoke_test.py`: on-device unittest for the feed reader (sync, list, read); needs Wi-Fi credentials saved on the Sticky.

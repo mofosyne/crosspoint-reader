@@ -52,6 +52,9 @@ void HalPowerManager::setPowerSaving(bool enabled) {
     // Wifi is active, force disabling power saving
     enabled = false;
   }
+#ifdef CROSSPOINT_SERIAL_INPUT
+  enabled = false;  // the debug console is polled by the main loop; keep it at full speed
+#endif
 
   // Held across the check and the switch: a Lock taken in between would find full speed, do
   // nothing, and then run at LOW_POWER_FREQ until the next key press.
