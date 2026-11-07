@@ -1124,6 +1124,54 @@ class NoDecoder : public zim::ClusterDecoder {
 
 }  // namespace
 
+TEST(ZimBrowser, CleanTitleDecodesEscapedMarkup) {
+  const auto clean = [](std::string t) {
+    zim::cleanTitle(t);
+    return t;
+  };
+  EXPECT_EQ(clean("&lt;i&gt;Agathis&lt;/i&gt;"), "Agathis");
+  EXPECT_EQ(clean("&lt;i&gt;A.N.T. Farm&lt;/i&gt; (TV series)"), "A.N.T. Farm (TV series)");
+  EXPECT_EQ(clean("<i>Aida</i>"), "Aida");
+  EXPECT_EQ(clean("1960s R&B"), "1960s R&B");
+  EXPECT_EQ(clean("Actor &amp; Actress"), "Actor & Actress");
+  EXPECT_EQ(clean("a < b > c"), "a < b > c");  // not a tag
+  EXPECT_EQ(clean("Dangling <i"), "Dangling <i");
+  EXPECT_EQ(clean(""), "");
+}
+
+TEST(ZimBrowser, LinkToPathResolvesRelativeToTheArticle) {
+  std::string path;
+  const auto link = [&](std::string_view href, std::string_view base) {
+    return zim::linkToPath(href, base, 'A', path);
+  };
+  ASSERT_TRUE(link("Ruby_(programming_language)", "A/Python"));
+  EXPECT_EQ(path, "Ruby_(programming_language)");
+  ASSERT_TRUE(link("./Moon#History", "A/Earth"));
+  EXPECT_EQ(path, "Moon");
+  ASSERT_TRUE(link("Caf%C3%A9?x=1", "A/X"));
+  EXPECT_EQ(path, "Caf\xC3\xA9");
+  ASSERT_TRUE(link("Star_Trek:_Voyager", "A/X"));
+  EXPECT_EQ(path, "Star_Trek:_Voyager");
+  ASSERT_TRUE(link("100%_pure", "A/X"));  // a stray % is kept
+  EXPECT_EQ(path, "100%_pure");
+  // Pages with a slash in their name (the landing page) reach the namespace root with "../../".
+  ASSERT_TRUE(link("../../A/English_Wikipedia", "A/User:x/Landing"));
+  EXPECT_EQ(path, "English_Wikipedia");
+  ASSERT_TRUE(link("../../A/Wikipedia%3AWikipedia_for_Schools/Welcome/History", "A/User:x/Landing"));
+  EXPECT_EQ(path, "Wikipedia:Wikipedia_for_Schools/Welcome/History");
+  ASSERT_TRUE(link("History", "A/Wikipedia:Schools/Welcome"));  // sibling of a page with a slash
+  EXPECT_EQ(path, "Wikipedia:Schools/History");
+  ASSERT_TRUE(link("/A/Moon", "A/Earth"));
+  EXPECT_EQ(path, "Moon");
+  EXPECT_FALSE(link("#cite_note-1", "A/X"));
+  EXPECT_FALSE(link("https://example.org/x", "A/X"));
+  EXPECT_FALSE(link("mailto:a@b.c", "A/X"));
+  EXPECT_FALSE(link("../I/photo.webp", "A/X"));  // another namespace: an image
+  EXPECT_FALSE(link("../../../../x", "A/X"));    // above the root
+  EXPECT_FALSE(link("", "A/X"));
+  EXPECT_FALSE(link("/absolute", "A/X"));
+}
+
 TEST(ZimBrowser, FindsTheArticleNamespaceAndListsTitlesInOrder) {
   BrowserFixture f;
   NoDecoder decoder;
@@ -1142,6 +1190,28 @@ TEST(ZimBrowser, SearchStartsAtThePrefix) {
   EXPECT_EQ(titlesOf(f.browser), (std::vector<std::string>{"Banana", "Berry", "Zebra"}));
   ASSERT_EQ(f.browser.search("zzz"), Status::Ok);
   EXPECT_EQ(f.browser.count(), 0u);
+}
+
+TEST(ZimBrowser, SearchTriesCapitalisedSpellings) {
+  BrowserFixture f;
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  ASSERT_EQ(f.browser.search("banana"), Status::Ok);  // lowercase sorts after every capital
+  EXPECT_EQ(f.browser.title(0), "Banana");
+  ASSERT_EQ(f.browser.search("apple fruit"), Status::Ok);
+  EXPECT_EQ(f.browser.title(0), "Apple fruit");
+  ASSERT_EQ(f.browser.search("Banana"), Status::Ok);  // already right: unchanged
+  EXPECT_EQ(f.browser.title(0), "Banana");
+}
+
+TEST(ZimBrowser, SearchFallsBackToTheArticlePath) {
+  BrowserFixture f;
+  NoDecoder decoder;
+  ASSERT_EQ(f.browser.open(f.source, decoder, f.loader), Status::Ok);
+  // "Cherry" is a path whose title is "Aardvark": the title list never starts with "Cherry".
+  ASSERT_EQ(f.browser.search("cherry"), Status::Ok);
+  ASSERT_GT(f.browser.count(), 0u);
+  EXPECT_EQ(f.browser.title(0), "Aardvark");
 }
 
 TEST(ZimBrowser, PagesThroughTheNamespace) {

@@ -1,6 +1,7 @@
 #include "ZimDevice.h"
 
 #include <HalMemory.h>
+#include <Logging.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 
@@ -18,7 +19,7 @@ const ZimMemory& psramMemory() {
   return memory;
 }
 
-bool SdFileByteSource::open(const std::string& path) {
+bool SdFileByteSource::openFile(const std::string& path) {
   file_ = Storage.open(path.c_str(), O_RDONLY);
   return file_ && file_.isOpen();
 }
@@ -26,10 +27,22 @@ bool SdFileByteSource::open(const std::string& path) {
 int32_t SdFileByteSource::readAt(uint64_t offset, void* dst, uint32_t len) {
   const int64_t start = esp_timer_get_time();
   int32_t result = -1;
-  if (file_ && file_.seek64(offset)) result = file_.read(dst, len);
+  int64_t seekUs = 0;
+  if (file_ && file_.seek64(offset)) {
+    seekUs = esp_timer_get_time() - start;
+    result = file_.read(dst, len);
+  }
+  const int64_t totalUs = esp_timer_get_time() - start;
   ++stats_.reads;
   stats_.bytes += len;
-  stats_.micros += esp_timer_get_time() - start;
+  stats_.micros += totalUs;
+  // A slow seek points at a fragmented exFAT file (the FAT chain is walked on each seek).
+  if (totalUs > SLOW_READ_US && slowLogged_ < MAX_SLOW_LOGS) {
+    ++slowLogged_;
+    LOG_INF("ZIM", "Slow SD read: offset %llu, %u bytes, seek %lld ms, total %lld ms",
+            static_cast<unsigned long long>(offset), static_cast<unsigned>(len), static_cast<long long>(seekUs / 1000),
+            static_cast<long long>(totalUs / 1000));
+  }
   return result;
 }
 

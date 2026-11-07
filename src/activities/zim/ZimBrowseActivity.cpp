@@ -13,6 +13,7 @@
 #include <climits>
 
 #include "MappedInputManager.h"
+#include "ZimArticleActivity.h"
 #include "activities/reader/DictionaryDefinitionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -41,22 +42,28 @@ void ZimBrowseActivity::onEnter() {
   decoder_ = makeUniqueNoThrow<zim::ZstdClusterDecoder>(zim::psramMemory());
   loader_ = makeUniqueNoThrow<zim::ZimBlobLoader>(zim::psramMemory());
   browser_ = makeUniqueNoThrow<zim::ZimBrowser>();
-  if (!decoder_ || !decoder_->valid() || !loader_ || !browser_) {
+  collector_ = makeUniqueNoThrow<ZimLinkCollector>();
+  if (!decoder_ || !decoder_->valid() || !loader_ || !browser_ || !collector_ || !collector_->valid()) {
     LOG_ERR("ZIM", "OOM: browse objects");
     return;
   }
+  showBusy();
   const unsigned long t0 = millis();
+  LOG_INF("ZIM", "Opening %s", path_.c_str());
   if (!source_.open(path_)) {
     LOG_ERR("ZIM", "Cannot open %s", path_.c_str());
     return;
   }
+  LOG_INF("ZIM", "File opened in %lu ms (%llu bytes)", millis() - t0, static_cast<unsigned long long>(source_.size()));
   zim::Status status = browser_->open(source_, *decoder_, *loader_);
+  LOG_INF("ZIM", "Archive parsed in %lu ms: %s", millis() - t0, zim::statusName(status));
   if (status == zim::Status::Ok) status = browser_->search("");
   if (status != zim::Status::Ok) {
-    LOG_ERR("ZIM", "Open failed st=%d", static_cast<int>(status));
+    LOG_ERR("ZIM", "Open failed: %s", zim::statusName(status));
     return;
   }
   LOG_INF("ZIM", "Opened %s: ns=%c, first page in %lu ms", path_.c_str(), browser_->contentNamespace(), millis() - t0);
+  hasMainPage_ = browser_->hasMainPage();
   ready_ = true;
   RenderLock lock(*this);
   rebuildRows();
@@ -65,9 +72,16 @@ void ZimBrowseActivity::onEnter() {
 void ZimBrowseActivity::onExit() {
   Activity::onExit();
   browser_.reset();
+  collector_.reset();
   loader_.reset();
   decoder_.reset();
   source_.close();
+}
+
+// Opening an archive or reading a cluster takes seconds; tell the user the device is working.
+void ZimBrowseActivity::showBusy() {
+  RenderLock lock(*this);
+  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 }
 
 void ZimBrowseActivity::setStatus(const char* text) { status_ = text; }
@@ -80,6 +94,16 @@ void ZimBrowseActivity::rebuildRows() {
   search.value = status_.empty() ? nullptr : status_.c_str();
   search.actionValue = 0;
   rowItems_.push_back(search);
+  mainPageRow_ = -1;
+  firstTitleRow_ = 1;
+  if (hasMainPage_) {
+    fui::ListItem home;
+    home.label = tr(STR_ZIM_MAIN_PAGE);
+    home.actionValue = static_cast<int16_t>(rowItems_.size());
+    mainPageRow_ = static_cast<int>(rowItems_.size());
+    rowItems_.push_back(home);
+    firstTitleRow_ = 2;
+  }
   for (size_t i = 0; i < browser_->count(); ++i) {
     fui::ListItem item;
     item.label = browser_->title(i).c_str();
@@ -131,7 +155,11 @@ void ZimBrowseActivity::activateIndex(const int index) {
     runBenchmark();
     return;
   }
-  const size_t row = static_cast<size_t>(index) - 1;
+  if (index == mainPageRow_) {
+    openMainPage();
+    return;
+  }
+  const size_t row = static_cast<size_t>(index) - firstTitleRow_;
   if (row < browser_->count()) {
     openArticle(row);
   } else {
@@ -153,11 +181,13 @@ void ZimBrowseActivity::startSearch() {
 }
 
 void ZimBrowseActivity::applySearch(const std::string& query) {
+  showBusy();
   const unsigned long t0 = millis();
   RenderLock lock(*this);
   const zim::Status status = browser_->search(query);
   char buf[48];
   if (status != zim::Status::Ok) {
+    LOG_ERR("ZIM", "Search '%s' failed: %s after %lu ms", query.c_str(), zim::statusName(status), millis() - t0);
     setStatus(tr(STR_ERROR_GENERAL_FAILURE));
   } else if (browser_->count() == 0) {
     setStatus(tr(STR_NO_ENTRIES));
@@ -174,11 +204,13 @@ void ZimBrowseActivity::applySearch(const std::string& query) {
 }
 
 void ZimBrowseActivity::showNextPage() {
+  showBusy();
   const unsigned long t0 = millis();
   RenderLock lock(*this);
   const zim::Status status = browser_->nextPage();
   char buf[48];
   snprintf(buf, sizeof(buf), "%lu ms", millis() - t0);
+  if (status != zim::Status::Ok) LOG_ERR("ZIM", "Next page failed: %s", zim::statusName(status));
   setStatus(status == zim::Status::Ok ? buf : tr(STR_ERROR_GENERAL_FAILURE));
   rebuildRows();
   nav.reset();
@@ -187,42 +219,86 @@ void ZimBrowseActivity::showNextPage() {
 }
 
 void ZimBrowseActivity::openArticle(const size_t row) {
+  showBusy();
   const unsigned long t0 = millis();
   zim::Blob blob;
   std::string headword;
-  zim::Status status = browser_->readArticle(row, blob, headword);
+  const zim::Status status = browser_->readArticle(row, blob, headword);
   const unsigned long readMs = millis() - t0;
-
-  std::string text;
-  if (status == zim::Status::Ok && !copyArticleHtml(blob, text)) status = zim::Status::OutOfMemory;
-  loader_->release();  // the 2-3 MiB buffers are not needed while the article is on screen
-  if (status != zim::Status::Ok) {
-    LOG_ERR("ZIM", "Article row %u failed st=%d after %lu ms", static_cast<unsigned>(row), static_cast<int>(status),
-            readMs);
-    RenderLock lock(*this);
-    setStatus(tr(STR_ERROR_GENERAL_FAILURE));
-    rebuildRows();
-    lock.unlock();
-    requestUpdate();
-    return;
-  }
-
-  const size_t htmlBytes = text.size();
-  const unsigned long t1 = millis();
-  text = htmlToPlainText(std::move(text), DICTIONARY_PLAIN_HEADWORD_MARKER);
-  const unsigned long convertMs = millis() - t1;
-  LOG_INF("ZIM", "Article '%s': read %lu ms, to text %lu ms, html=%u text=%u", headword.c_str(), readMs, convertMs,
-          static_cast<unsigned>(htmlBytes), static_cast<unsigned>(text.size()));
-
-  {
+  ZimArticle article;
+  if (status == zim::Status::Ok && convertBlob(blob, std::move(headword), article)) {
+    LOG_INF("ZIM", "Article '%s': read %lu ms, total %lu ms, text=%u links=%u", article.headword.c_str(), readMs,
+            millis() - t0, static_cast<unsigned>(article.textLen), static_cast<unsigned>(article.linkCount));
     char buf[48];
     snprintf(buf, sizeof(buf), "%lu ms", millis() - t0);
-    RenderLock lock(*this);
-    setStatus(buf);
-    rebuildRows();
+    {
+      RenderLock lock(*this);
+      setStatus(buf);
+      rebuildRows();
+    }
+    showArticle(std::move(article));
+    return;
   }
-  auto viewer = makeUniqueNoThrow<DictionaryDefinitionActivity>(renderer, mappedInput, std::move(headword),
-                                                                std::move(text), /*htmlDefinition=*/false);
+  loader_->release();
+  LOG_ERR("ZIM", "Article row %u failed: %s after %lu ms", static_cast<unsigned>(row), zim::statusName(status), readMs);
+  RenderLock lock(*this);
+  setStatus(tr(STR_ERROR_GENERAL_FAILURE));
+  rebuildRows();
+  lock.unlock();
+  requestUpdate();
+}
+
+void ZimBrowseActivity::openMainPage() {
+  showBusy();
+  const unsigned long t0 = millis();
+  zim::Blob blob;
+  std::string headword;
+  const zim::Status status = browser_->readMainPage(blob, headword);
+  ZimArticle article;
+  if (status == zim::Status::Ok && convertBlob(blob, std::move(headword), article)) {
+    LOG_INF("ZIM", "Main page '%s' in %lu ms, text=%u links=%u", article.headword.c_str(), millis() - t0,
+            static_cast<unsigned>(article.textLen), static_cast<unsigned>(article.linkCount));
+    showArticle(std::move(article));
+    return;
+  }
+  loader_->release();
+  LOG_ERR("ZIM", "Main page failed: %s", zim::statusName(status));
+  RenderLock lock(*this);
+  setStatus(tr(STR_ERROR_GENERAL_FAILURE));
+  rebuildRows();
+  lock.unlock();
+  requestUpdate();
+}
+
+bool ZimBrowseActivity::convertBlob(zim::Blob& blob, std::string headword, ZimArticle& out) {
+  const unsigned long t0 = millis();
+  const bool ok =
+      collector_->build(blob, std::move(headword), browser_->lastArticlePath(), browser_->contentNamespace(), out);
+  loader_->release();  // the 2-4 MiB cluster buffers are not needed while the article is on screen
+  if (ok) LOG_DBG("ZIM", "Converted in %lu ms", millis() - t0);
+  return ok;
+}
+
+bool ZimBrowseActivity::openLinkTarget(const std::string_view path, ZimArticle& out) {
+  const unsigned long t0 = millis();
+  zim::Blob blob;
+  std::string headword;
+  const zim::Status status = browser_->readPath(path, blob, headword);
+  if (status != zim::Status::Ok) {
+    loader_->release();
+    LOG_ERR("ZIM", "Link '%.*s' failed: %s", static_cast<int>(std::min<size_t>(path.size(), 80)), path.data(),
+            zim::statusName(status));
+    return false;
+  }
+  const bool ok = convertBlob(blob, std::move(headword), out);
+  LOG_INF("ZIM", "Link '%s' in %lu ms (%s)", out.headword.c_str(), millis() - t0, ok ? "ok" : "convert failed");
+  return ok;
+}
+
+void ZimBrowseActivity::showArticle(ZimArticle&& article) {
+  auto viewer = makeUniqueNoThrow<ZimArticleActivity>(
+      renderer, mappedInput, std::move(article),
+      [this](std::string_view path, ZimArticle& out) { return openLinkTarget(path, out); });
   if (!viewer) {
     LOG_ERR("ZIM", "OOM: article viewer");
     return;
@@ -360,3 +436,31 @@ void ZimBrowseActivity::runBenchmark() {
   }
   startActivityForResult(std::move(viewer), [](const ActivityResult&) {});
 }
+
+#ifdef CROSSPOINT_SERIAL_INPUT
+std::string ZimBrowseActivity::debugState() {
+  std::string out = "ZimBrowse '" + title_ + "'" + (ready_ ? "" : " [not ready]") + " status='" + status_ + "'\n";
+  for (size_t i = 0; i < rowItems_.size(); ++i) {
+    out += std::to_string(i) + ": " + (rowItems_[i].label ? rowItems_[i].label : "") + "\n";
+  }
+  return out;
+}
+
+// Commands: ROW:n (activate a list row), SEARCH:text, MAIN, NEXT.
+bool ZimBrowseActivity::debugCommand(const std::string& command) {
+  if (!ready_) return false;
+  if (command.rfind("ROW:", 0) == 0) {
+    activateIndex(atoi(command.c_str() + 4));
+  } else if (command.rfind("SEARCH:", 0) == 0) {
+    applySearch(command.substr(7));
+  } else if (command == "MAIN") {
+    if (!hasMainPage_) return false;
+    openMainPage();
+  } else if (command == "NEXT") {
+    showNextPage();
+  } else {
+    return false;
+  }
+  return true;
+}
+#endif

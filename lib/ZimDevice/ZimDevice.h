@@ -23,7 +23,10 @@ const ZimMemory& psramMemory();
 // Read-only ByteSource over an SD file. One open handle per instance.
 class SdFileByteSource : public freeink::content::ByteSource {
  public:
-  bool open(const std::string& path);
+  bool open(const std::string& path) {
+    slowLogged_ = 0;
+    return openFile(path);
+  }
   void close() { file_.close(); }
   int32_t readAt(uint64_t offset, void* dst, uint32_t len) override;
   uint64_t size() const override { return file_ ? file_.fileSize64() : 0; }
@@ -38,8 +41,13 @@ class SdFileByteSource : public freeink::content::ByteSource {
   void resetStats() { stats_ = Stats{}; }
 
  private:
+  bool openFile(const std::string& path);
+  static constexpr int64_t SLOW_READ_US = 100 * 1000;
+  static constexpr uint8_t MAX_SLOW_LOGS = 10;  // per open file, to keep the log readable
+
   mutable HalFile file_;
   Stats stats_;
+  uint8_t slowLogged_ = 0;
 };
 
 }  // namespace zim

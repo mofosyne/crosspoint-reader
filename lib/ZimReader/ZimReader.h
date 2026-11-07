@@ -24,6 +24,27 @@ enum class Status : uint8_t {
   OutOfMemory,
 };
 
+// Short name for logs.
+inline const char* statusName(Status s) {
+  switch (s) {
+    case Status::Ok:
+      return "Ok";
+    case Status::NotFound:
+      return "NotFound";
+    case Status::IoError:
+      return "IoError";
+    case Status::Corrupt:
+      return "Corrupt";
+    case Status::Unsupported:
+      return "Unsupported";
+    case Status::BufferTooSmall:
+      return "BufferTooSmall";
+    case Status::OutOfMemory:
+      return "OutOfMemory";
+  }
+  return "?";
+}
+
 enum class Compression : uint8_t { None, Xz, Zstd, Unknown };
 
 enum class EntryKind : uint8_t { Content, Redirect, Other };
@@ -57,9 +78,9 @@ struct Entry {
 
 struct ClusterInfo {
   Compression compression = Compression::None;
-  bool extended = false;   // 8-byte blob offsets instead of 4-byte
-  uint64_t offset = 0;     // file offset of the cluster's info byte
-  uint64_t packedSize = 0; // bytes on disk, including the info byte
+  bool extended = false;    // 8-byte blob offsets instead of 4-byte
+  uint64_t offset = 0;      // file offset of the cluster's info byte
+  uint64_t packedSize = 0;  // bytes on disk, including the info byte
   // False for the last cluster: the archive stores no end offset for it and the
   // directory entries and pointer tables follow it, so packedSize is only an upper bound.
   bool exactExtent = true;
