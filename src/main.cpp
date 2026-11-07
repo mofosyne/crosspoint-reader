@@ -45,6 +45,10 @@
 #if CROSSPOINT_ZIM
 #include "activities/zim/ZimBrowseActivity.h"
 #endif
+#if CROSSPOINT_FEEDS
+#include "activities/feeds/FeedsActivity.h"
+#include "feeds/FeedStore.h"
+#endif
 #include "WifiCredentialStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
@@ -914,6 +918,24 @@ static void handleCommand(const String& cmd) {
     sendDebugText("DO", handled ? "ok" : "unhandled");
     return;
   }
+#if CROSSPOINT_FEEDS
+  if (cmd == "FEEDS") {  // open the feed reader from anywhere
+    activityManager.pushActivity(makeUniqueNoThrow<FeedsActivity>(renderer, mappedInputManager));
+    sendDebugText("DO", "ok");
+    return;
+  }
+  if (cmd == "FEEDSRESET") {  // forget everything a sync saved (not the sources file)
+    const bool ok = Storage.removeDir("/feeds/items") | Storage.removeDir("/feeds/state");
+    sendDebugText("DO", ok ? "ok" : "nothing to remove");
+    return;
+  }
+  if (cmd.startsWith("SRC:")) {  // append a line to /feeds/sources.txt; SRC:CLEAR empties the file
+    Storage.ensureDirectoryExists("/feeds");
+    String content = cmd == "SRC:CLEAR" ? String() : Storage.readFile(feeds::SOURCES_PATH) + cmd.substring(4) + "\n";
+    sendDebugText("DO", Storage.writeFile(feeds::SOURCES_PATH, content) ? "ok" : "failed");
+    return;
+  }
+#endif
 #if CROSSPOINT_ZIM
   if (cmd.startsWith(
           "ZIM:")) {  // open an archive from anywhere, e.g. ZIM:/zim/wikipedia_en_for_schools_maxi_2024-08.zim
@@ -950,7 +972,7 @@ static void handleSerialCommands() {
   uint8_t c = 0;
   while (esp_rom_output_rx_one_char(&c) == 0) {
     if (c != '\n') {
-      if (c != '\r' && line.length() < 64) line += static_cast<char>(c);
+      if (c != '\r' && line.length() < 256) line += static_cast<char>(c);
       continue;
     }
     String cmd = line;

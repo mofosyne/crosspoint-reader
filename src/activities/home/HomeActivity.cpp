@@ -25,9 +25,15 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#if CROSSPOINT_FEEDS
+#include "activities/feeds/FeedsActivity.h"
+#endif
 
 int HomeActivity::getMenuItemCount() const {
   int count = 4;  // File Browser, Library, File transfer, Settings
+#if CROSSPOINT_FEEDS
+  count++;
+#endif
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -324,6 +330,9 @@ void HomeActivity::loop() {
       case HomeMenuItem::FILE_TRANSFER:
         onFileTransferOpen();
         break;
+      case HomeMenuItem::FEEDS:
+        onFeedsOpen();
+        break;
       case HomeMenuItem::SETTINGS_MENU:
         onSettingsOpen();
         break;
@@ -528,6 +537,11 @@ void HomeActivity::render(RenderLock&&) {
                                         tr(STR_SETTINGS_TITLE)};
   std::vector<UIIcon> menuIcons = {Folder, Library, Transfer, Settings};
 
+#if CROSSPOINT_FEEDS
+  menuItems.insert(menuItems.end() - 1, tr(STR_FEEDS));  // before Settings
+  menuIcons.insert(menuIcons.end() - 1, Wifi);
+#endif
+
   if (hasLibrarySlot()) {
     menuItems.insert(menuItems.begin() + 2, hasPlugins ? tr(STR_PLUGINS) : tr(STR_OPDS_BROWSER));
     menuIcons.insert(menuIcons.begin() + 2, Plugins);
@@ -574,6 +588,13 @@ void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
+
+void HomeActivity::onFeedsOpen() {
+#if CROSSPOINT_FEEDS
+  auto feedsScreen = makeUniqueNoThrow<FeedsActivity>(renderer, mappedInput);
+  if (feedsScreen) startActivityForResult(std::move(feedsScreen), [](const ActivityResult&) {});
+#endif
+}
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
 
