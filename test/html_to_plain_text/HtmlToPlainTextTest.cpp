@@ -5,6 +5,7 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "HtmlToPlainText.h"
 
@@ -94,6 +95,133 @@ TEST(HtmlToPlainText, KeepsTextAroundHiddenElements) {
 TEST(HtmlToPlainText, UnclosedHiddenElementEndsTheText) {
   EXPECT_EQ(htmlToPlainText("before<style>never closed", '\x01'), "before");
   EXPECT_EQ(htmlToPlainText("before<script/>after", '\x01'), "beforeafter");  // self-closing: nothing to skip
+}
+
+TEST(HtmlToPlainText, SuperscriptGetsACaret) {
+  EXPECT_EQ(htmlToPlainText("7.3\xC3\x97"
+                            "10<sup>22</sup> kg",
+                            '\x01'),
+            "7.3\xC3\x97"
+            "10^22 kg");
+  EXPECT_EQ(htmlToPlainText("km<SUP>2</SUP>", '\x01'), "km^2");
+  EXPECT_EQ(htmlToPlainText("<super>x</super>", '\x01'), "x");  // similar name
+}
+
+TEST(HtmlToPlainText, FootnoteSuperscriptsAreDropped) {
+  EXPECT_EQ(htmlToPlainText("fact<sup id=\"c1\" class=\"mw-ref reference\"><a href=\"#n1\">[1]</a></sup>.", '\x01'),
+            "fact.");
+  EXPECT_EQ(htmlToPlainText("claim<sup class='noprint Inline-Template'>[citation needed]</sup>", '\x01'), "claim");
+}
+
+TEST(HtmlToPlainText, ImageWithoutAltBecomesPlaceholder) {
+  EXPECT_EQ(htmlToPlainText("a<img src=\"../I/photo.webp\" width=\"290\" height=\"276\">b", '\x01'), "a[image]b");
+}
+
+TEST(HtmlToPlainText, TinyImageWithoutAltIsDropped) {
+  EXPECT_EQ(htmlToPlainText("a<img src=\"i.png\" width=\"16\" height=\"16\">b", '\x01'), "ab");
+}
+
+TEST(HtmlToPlainText, ImageAltTextIsShown) {
+  EXPECT_EQ(htmlToPlainText("<img alt=\"A &amp; B map\" src=\"m.png\">", '\x01'), "[image: A & B map]");
+  EXPECT_EQ(htmlToPlainText("<img data-alt=\"no\" src=\"m.png\">", '\x01'), "[image]");
+}
+
+TEST(HtmlToPlainText, SymbolImageIsInsertedAsText) {
+  EXPECT_EQ(htmlToPlainText("x <img alt=\"\xE2\x98\xBE\" src=\"s.png\" width=\"24\"> y", '\x01'), "x \xE2\x98\xBE y");
+}
+
+TEST(HtmlToPlainText, MathImageShowsItsFormula) {
+  EXPECT_EQ(
+      htmlToPlainText("<img src=\"m.svg\" aria-hidden=\"true\" alt=\"{\\displaystyle e}\" loading=\"lazy\">", '\x01'),
+      "[formula: e]");
+  EXPECT_EQ(htmlToPlainText("<img alt=\"{\\displaystyle \\sin ^{2}(e/2)}\" src=\"m.svg\">", '\x01'),
+            "[formula: \\sin ^{2}(e/2)]");
+}
+
+TEST(HtmlToPlainText, BareImageTagNeverOverrunsTheBuffer) {
+  // "[image]" is longer than "<img>", so it must be skipped rather than overwrite unread text.
+  EXPECT_EQ(htmlToPlainText("<img>after", '\x01'), "after");
+  EXPECT_EQ(htmlToPlainText("<img/>after", '\x01'), "after");
+}
+
+struct Collected : LinkSink {
+  struct Link {
+    size_t start;
+    size_t end;
+    std::string href;
+  };
+  void onLink(size_t start, size_t end, std::string_view href) override {
+    links.push_back({start, end, std::string(href)});
+  }
+  std::vector<Link> links;
+};
+
+std::string convert(std::string html, Collected& sink) {
+  html.resize(htmlToPlainTextInPlace(html.data(), html.size(), '\x01', &sink));
+  return html;
+}
+
+TEST(HtmlToPlainText, ReportsLinkRangesInTheOutput) {
+  Collected sink;
+  const std::string text = convert(
+      "<p>See <a href=\"Ruby_(programming_language)\" title=\"x\">Ruby</a> and <a href='PyPy'>PyPy</a>.</p>", sink);
+  EXPECT_EQ(text, "See Ruby and PyPy.");
+  ASSERT_EQ(sink.links.size(), 2u);
+  EXPECT_EQ(text.substr(sink.links[0].start, sink.links[0].end - sink.links[0].start), "Ruby");
+  EXPECT_EQ(sink.links[0].href, "Ruby_(programming_language)");
+  EXPECT_EQ(text.substr(sink.links[1].start, sink.links[1].end - sink.links[1].start), "PyPy");
+  EXPECT_EQ(sink.links[1].href, "PyPy");
+}
+
+TEST(HtmlToPlainText, LinkOffsetsSurviveEarlierCompaction) {
+  // Tags and entities before the link shrink the text, so offsets must follow the output.
+  Collected sink;
+  const std::string text = convert("<div><b>a</b> &amp; <i>b</i> <a class=\"x\" href=\"Target\">go</a></div>", sink);
+  EXPECT_EQ(text, "a & b go");
+  ASSERT_EQ(sink.links.size(), 1u);
+  EXPECT_EQ(text.substr(sink.links[0].start, sink.links[0].end - sink.links[0].start), "go");
+}
+
+TEST(HtmlToPlainText, AnchorsWithoutHrefAreNotLinks) {
+  Collected sink;
+  EXPECT_EQ(convert("<a id=\"top\">Top</a> <a href=\"\">e</a>", sink), "Top e");
+  EXPECT_TRUE(sink.links.empty());
+}
+
+TEST(HtmlToPlainText, EmptySuperscriptGetsNoCaret) {
+  EXPECT_EQ(htmlToPlainText("m/s<sup><a class=\"reference-link\"></a></sup> end", '\x01'), "m/s end");
+  EXPECT_EQ(htmlToPlainText("m/s<sup>2</sup>", '\x01'), "m/s^2");
+}
+
+TEST(HtmlToPlainText, InfoboxRowsReadAsLabelAndValue) {
+  EXPECT_EQ(htmlToPlainText("<table><tr><th>Perigee</th><td>362600 km</td></tr>"
+                            "<tr><th>Eccentricity</th><td>0.0549</td></tr></table>",
+                            '\x01'),
+            "Perigee: 362600 km\nEccentricity: 0.0549");
+}
+
+TEST(HtmlToPlainText, DataTableCellsAreSetApart) {
+  EXPECT_EQ(htmlToPlainText("<table><tr><td>a</td><td>b</td><td>c</td></tr></table>", '\x01'), "a | b | c");
+}
+
+TEST(HtmlToPlainText, NavigationBoxesAndReferenceListsAreDropped) {
+  EXPECT_EQ(
+      htmlToPlainText("before<div class=\"navbox\"><div class=\"navbox-inner\">links</div>more</div>after", '\x01'),
+      "beforeafter");
+  EXPECT_EQ(htmlToPlainText("text<div class=\"reflist\"><ol><li>ref</li></ol></div>", '\x01'), "text");
+  EXPECT_EQ(htmlToPlainText("<div class=\"hatnote\">For other uses</div>", '\x01'), "For other uses");
+}
+
+TEST(HtmlToPlainText, InlineFootnoteMarkersAreDropped) {
+  EXPECT_EQ(htmlToPlainText("0.0549<span class=\"mw-ref reference\"><a href=\"#c\"><span class=\"b\">[</span>1"
+                            "<span class=\"b\">]</span></a></span> km",
+                            '\x01'),
+            "0.0549 km");
+}
+
+TEST(HtmlToPlainText, LabelCellWithABlockStillJoinsItsValue) {
+  EXPECT_EQ(htmlToPlainText("<tr><th><div>Mean radius</div></th><td>1737.4 km</td></tr>", '\x01'),
+            "Mean radius: 1737.4 km");
 }
 
 }  // namespace
