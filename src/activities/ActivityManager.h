@@ -102,6 +102,9 @@ class ActivityManager {
 
   // This will move current activity to stack instead of deleting it
   void pushActivity(std::unique_ptr<Activity>&& activity);
+#ifdef CROSSPOINT_SERIAL_INPUT
+  Activity* debugCurrent() const { return currentActivity.get(); }
+#endif
 
   // Remove the currentActivity, returning the last one on stack
   // Note: if popActivity() on last activity on the stack, we will goHome()

@@ -52,6 +52,17 @@ class HalGPIO {
   enum class DeviceType : uint8_t { X4, X3 };
 
  private:
+#ifdef CROSSPOINT_SERIAL_INPUT
+  struct Injected {
+    bool tap = false;
+    float nx = 0;
+    float ny = 0;
+    int button = -1;
+  };
+  Injected injectedPending_;
+  Injected injectedNow_;
+#endif
+
   DeviceType _deviceType = DeviceType::X4;
 
  public:
@@ -74,6 +85,12 @@ class HalGPIO {
 
   // Button input methods
   void update();
+#ifdef CROSSPOINT_SERIAL_INPUT
+  // Debug builds only: queue a tap or a button press+release for the next update(), so a serial
+  // command can drive the UI. Each is seen for exactly one frame.
+  void injectTap(float nx, float ny);
+  void injectButton(uint8_t buttonIndex);
+#endif
   bool isPressed(uint8_t buttonIndex) const;
   bool wasPressed(uint8_t buttonIndex) const;
   bool wasAnyPressed() const;

@@ -30,6 +30,24 @@ class KeyboardEntryActivity : public Activity {
   void onEnter() override;
   void onExit() override;
   void loop() override;
+#ifdef CROSSPOINT_SERIAL_INPUT
+  std::string debugState() override { return "Keyboard '" + title + "' text='" + text + "'"; }
+  // TEXT:<s> replaces the field, SUBMIT accepts it, CANCEL leaves.
+  bool debugCommand(const std::string& command) override {
+    if (command.rfind("TEXT:", 0) == 0) {
+      text = command.substr(5);
+      cursorPos = text.size();
+      requestUpdate();
+    } else if (command == "SUBMIT") {
+      onComplete(text);
+    } else if (command == "CANCEL") {
+      onCancel();
+    } else {
+      return false;
+    }
+    return true;
+  }
+#endif
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return true; }
 

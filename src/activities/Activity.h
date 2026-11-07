@@ -34,6 +34,13 @@ class Activity {
   virtual void prepareForSleep() {}
   virtual void loop() {}
 
+#ifdef CROSSPOINT_SERIAL_INPUT
+  // Debug console (CMD:STATE, CMD:DO:<command>): describe this screen as text, and accept direct
+  // commands such as "ROW:3" or "TEXT:moon". Both run on the main loop task.
+  virtual std::string debugState() { return name; }
+  virtual bool debugCommand(const std::string& /*command*/) { return false; }
+#endif
+
   virtual void render(RenderLock&&) {}
 
   // If immediate is true, the update will be triggered immediately.

@@ -16,6 +16,7 @@
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SPI.h>
 #include <TrustedTime.h>
 #include <VectorFontSupport.h>
@@ -23,6 +24,8 @@
 #include <XteinkDetect.h>
 #include <builtinFonts/all.h>
 #include <esp_heap_caps.h>
+#include <esp_rom_sys.h>
+#include <esp_rom_uart.h>
 #include <esp_wifi.h>
 #include <time.h>
 
@@ -39,6 +42,9 @@
 #include "OpdsTokenStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#if CROSSPOINT_ZIM
+#include "activities/zim/ZimBrowseActivity.h"
+#endif
 #include "WifiCredentialStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
@@ -707,12 +713,20 @@ void setup() {
                                   : (SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
 
+  // CROSSPOINT_SERIAL_INPUT builds skip the power-button hold check: opening the serial port resets
+  // the board, and a test session must restart it without a person pressing the button.
+  constexpr bool skipHoldCheck =
+#ifdef CROSSPOINT_SERIAL_INPUT
+      true;
+#else
+      false;
+#endif
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
       // With Short Power Button Press = Sleep, a single click wakes on any
       // device; otherwise the button must still be held (ghost-wake debounce).
       // Picco: plugging in USB pulses the wake line; power on, as stock does.
-      if (!wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP &&
+      if (!skipHoldCheck && !wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP &&
           !(FREEINK_DEVICE_PICCO && gpio.isUsbConnected())) {
         LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
         Storage.prepareForDeepSleep();
@@ -852,6 +866,113 @@ void setup() {
   allowSleepAt = millis() + 2000;
 }
 
+// Sends the framebuffer for the "CMD:SCREENSHOT" serial command: a text header, the raw bytes, a
+// text trailer. On the Sticky the console is the UART0 bridge, so the bytes go out through the ROM
+// console too; elsewhere they go through `logSerial`.
+static void sendScreenshot() {
+  const uint32_t bufferSize = display.getBufferSize();
+  const uint8_t* buf = display.getFrameBuffer();
+#if FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF
+  esp_rom_printf("SCREENSHOT_START:%d\n", static_cast<int>(bufferSize));
+  for (uint32_t i = 0; i < bufferSize; i++) {
+    esp_rom_output_tx_one_char(buf[i]);
+    if ((i & 0x3FF) == 0x3FF) delay(1);  // let the idle task run during the ~4 s transfer
+  }
+  esp_rom_printf("SCREENSHOT_END\n");
+#else
+  logSerial.printf("SCREENSHOT_START:%d\n", bufferSize);
+  logSerial.write(buf, bufferSize);
+  logSerial.printf("SCREENSHOT_END\n");
+#endif
+}
+
+#ifdef CROSSPOINT_SERIAL_INPUT
+// Text reply for the debug console, framed so a script can find it among the log lines.
+static void sendDebugText(const char* tag, const std::string& text) {
+#if FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF
+  esp_rom_printf("%s_START\n%s\n%s_END\n", tag, text.c_str(), tag);
+#else
+  logSerial.printf("%s_START\n%s\n%s_END\n", tag, text.c_str(), tag);
+#endif
+}
+#endif
+
+static void handleCommand(const String& cmd) {
+  if (cmd == "SCREENSHOT") {
+    sendScreenshot();
+    return;
+  }
+#ifdef CROSSPOINT_SERIAL_INPUT
+  if (cmd == "STATE") {
+    Activity* current = activityManager.debugCurrent();
+    sendDebugText("STATE", current ? current->debugState() : "(no activity)");
+    return;
+  }
+  if (cmd.startsWith("DO:")) {
+    Activity* current = activityManager.debugCurrent();
+    const bool handled = current && current->debugCommand(std::string(cmd.c_str() + 3));
+    sendDebugText("DO", handled ? "ok" : "unhandled");
+    return;
+  }
+#if CROSSPOINT_ZIM
+  if (cmd.startsWith(
+          "ZIM:")) {  // open an archive from anywhere, e.g. ZIM:/zim/wikipedia_en_for_schools_maxi_2024-08.zim
+    activityManager.pushActivity(
+        makeUniqueNoThrow<ZimBrowseActivity>(renderer, mappedInputManager, std::string(cmd.c_str() + 4)));
+    sendDebugText("DO", "ok");
+    return;
+  }
+#endif
+  // Debug input, for testing the UI from a PC: "TAP:<x>,<y>" (0..1 across the touch panel) and
+  // "BTN:BACK|CONFIRM|LEFT|RIGHT|UP|DOWN".
+  if (cmd.startsWith("TAP:")) {
+    const int comma = cmd.indexOf(',');
+    if (comma > 4) gpio.injectTap(cmd.substring(4, comma).toFloat(), cmd.substring(comma + 1).toFloat());
+  } else if (cmd.startsWith("BTN:")) {
+    const String name = cmd.substring(4);
+    static constexpr struct {
+      const char* name;
+      uint8_t index;
+    } BUTTONS[] = {{"BACK", HalGPIO::BTN_BACK},   {"CONFIRM", HalGPIO::BTN_CONFIRM}, {"LEFT", HalGPIO::BTN_LEFT},
+                   {"RIGHT", HalGPIO::BTN_RIGHT}, {"UP", HalGPIO::BTN_UP},           {"DOWN", HalGPIO::BTN_DOWN}};
+    for (const auto& b : BUTTONS) {
+      if (name == b.name) gpio.injectButton(b.index);
+    }
+  }
+#endif
+}
+
+// Serial commands, one per line, prefixed "CMD:" (SCREENSHOT; TAP and BTN in builds with CROSSPOINT_SERIAL_INPUT). The
+// Sticky's console is UART0 through a USB bridge, which `logSerial` (native USB) does not see, so poll the ROM console.
+static void handleSerialCommands() {
+  static String line;
+#if FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF
+  uint8_t c = 0;
+  while (esp_rom_output_rx_one_char(&c) == 0) {
+    if (c != '\n') {
+      if (c != '\r' && line.length() < 64) line += static_cast<char>(c);
+      continue;
+    }
+    String cmd = line;
+    line = "";
+    if (cmd.startsWith("CMD:")) {
+      cmd = cmd.substring(4);
+      cmd.trim();
+      handleCommand(cmd);
+    }
+  }
+#else
+  if (logSerial.available() > 0) {
+    String cmd = logSerial.readStringUntil('\n');
+    if (cmd.startsWith("CMD:")) {
+      cmd = cmd.substring(4);
+      cmd.trim();
+      handleCommand(cmd);
+    }
+  }
+#endif
+}
+
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
@@ -917,22 +1038,7 @@ void loop() {
     lastMemPrint = millis();
   }
 
-  // Handle incoming serial commands,
-  // nb: we use logSerial from logging to avoid deprecation warnings
-  if (logSerial.available() > 0) {
-    String line = logSerial.readStringUntil('\n');
-    if (line.startsWith("CMD:")) {
-      String cmd = line.substring(4);
-      cmd.trim();
-      if (cmd == "SCREENSHOT") {
-        const uint32_t bufferSize = display.getBufferSize();
-        logSerial.printf("SCREENSHOT_START:%d\n", bufferSize);
-        uint8_t* buf = display.getFrameBuffer();
-        logSerial.write(buf, bufferSize);
-        logSerial.printf("SCREENSHOT_END\n");
-      }
-    }
-  }
+  handleSerialCommands();
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();

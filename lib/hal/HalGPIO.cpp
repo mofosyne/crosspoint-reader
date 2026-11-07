@@ -120,7 +120,21 @@ void HalGPIO::begin() {
 #endif
 }
 
+#ifdef CROSSPOINT_SERIAL_INPUT
+void HalGPIO::injectTap(float nx, float ny) {
+  injectedPending_.tap = true;
+  injectedPending_.nx = nx;
+  injectedPending_.ny = ny;
+}
+
+void HalGPIO::injectButton(uint8_t buttonIndex) { injectedPending_.button = buttonIndex; }
+#endif
+
 void HalGPIO::update() {
+#ifdef CROSSPOINT_SERIAL_INPUT
+  injectedNow_ = injectedPending_;  // visible for this frame only
+  injectedPending_ = Injected{};
+#endif
   inputMgr.update();
   const uint8_t pageButtons = inputMgr.capacitivePageButtonMask();
   capacitivePagePressed = (pageButtons & ~previousCapacitivePageButtons) != 0;
@@ -138,13 +152,33 @@ void HalGPIO::prepareForDeepSleep() {
   if (!inputMgr.prepareForDeepSleep()) LOG_ERR("GPIO", "Failed to put touch controller to sleep");
 }
 
-bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed(buttonIndex); }
+bool HalGPIO::wasPressed(uint8_t buttonIndex) const {
+#ifdef CROSSPOINT_SERIAL_INPUT
+  if (injectedNow_.button == buttonIndex) return true;
+#endif
+  return inputMgr.wasPressed(buttonIndex);
+}
 
-bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
+bool HalGPIO::wasAnyPressed() const {
+#ifdef CROSSPOINT_SERIAL_INPUT
+  if (injectedNow_.button >= 0) return true;
+#endif
+  return inputMgr.wasAnyPressed();
+}
 
-bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return inputMgr.wasReleased(buttonIndex); }
+bool HalGPIO::wasReleased(uint8_t buttonIndex) const {
+#ifdef CROSSPOINT_SERIAL_INPUT
+  if (injectedNow_.button == buttonIndex) return true;
+#endif
+  return inputMgr.wasReleased(buttonIndex);
+}
 
-bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased(); }
+bool HalGPIO::wasAnyReleased() const {
+#ifdef CROSSPOINT_SERIAL_INPUT
+  if (injectedNow_.button >= 0) return true;
+#endif
+  return inputMgr.wasAnyReleased();
+}
 
 bool HalGPIO::rawInputActive() {
   if (inputMgr.isPowerButtonPhysicallyPressed()) return true;
@@ -176,7 +210,16 @@ bool HalGPIO::isToggleSwitchOn() const { return inputMgr.isToggleSwitchOn(); }
 
 bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
 
-bool HalGPIO::wasTouchTap(float& nx, float& ny) const { return inputMgr.wasTouchTap(nx, ny); }
+bool HalGPIO::wasTouchTap(float& nx, float& ny) const {
+#ifdef CROSSPOINT_SERIAL_INPUT
+  if (injectedNow_.tap) {
+    nx = injectedNow_.nx;
+    ny = injectedNow_.ny;
+    return true;
+  }
+#endif
+  return inputMgr.wasTouchTap(nx, ny);
+}
 
 bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
 
@@ -198,7 +241,12 @@ bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEn
   return inputMgr.wasSwipe(nxStart, nyStart, nxEnd, nyEnd);
 }
 
-bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
+bool HalGPIO::wasTouchActivity() const {
+#ifdef CROSSPOINT_SERIAL_INPUT
+  if (injectedNow_.tap) return true;
+#endif
+  return inputMgr.wasTouchActivity();
+}
 
 void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
   InputManager::setSharedConfirmPowerShortPressEmitsPower(enabled);
