@@ -410,6 +410,10 @@ bool ActivityManager::isReaderActivity() const {
          (currentActivity && currentActivity->isReaderActivity());
 }
 
+bool ActivityManager::sleepResume(SleepResume& out) const {
+  return currentActivity && currentActivity->sleepResume(out);
+}
+
 bool ActivityManager::isForegroundReader() const {
   return pendingAction == PendingAction::None && currentActivity && currentActivity->isReaderActivity();
 }

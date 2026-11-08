@@ -19,6 +19,7 @@ bool loadViewerArticle(std::string_view url, ZimArticle& out, bool markAsRead) {
 
   out = ZimArticle{};
   out.headword = a.title;
+  out.path = key;
   out.text = HalMemory::allocatePsram(a.text.size() + 1);
   size_t pathBytes = 0;
   for (const auto& l : a.links) pathBytes += l.url.size();
@@ -49,12 +50,17 @@ bool loadViewerArticle(std::string_view url, ZimArticle& out, bool markAsRead) {
 }
 
 std::unique_ptr<Activity> makeArticleViewer(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                            const std::string& url) {
+                                            const std::string& url, int startPage) {
   ZimArticle article;
   if (!loadViewerArticle(url, article)) return nullptr;
-  return makeUniqueNoThrow<ZimArticleActivity>(
+  auto viewer = makeUniqueNoThrow<ZimArticleActivity>(
       renderer, mappedInput, std::move(article),
       [](std::string_view target, ZimArticle& out) { return loadViewerArticle(target, out); });
+  if (viewer) {
+    viewer->setResumeContext(2, "");
+    viewer->setStartPage(startPage);
+  }
+  return viewer;
 }
 
 }  // namespace feeds

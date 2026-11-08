@@ -14,13 +14,14 @@
 // an article does not depend on the small internal heap (its largest block is about 155 KB).
 struct ZimArticle {
   struct Link {
-    uint32_t start;       // byte range of the link text inside `text`
+    uint32_t start;  // byte range of the link text inside `text`
     uint32_t end;
     uint32_t pathOffset;  // archive path inside `paths`
     uint32_t pathLen;
   };
 
   std::string headword;
+  std::string path;             // where it came from: archive path, or feed article URL (for resuming)
   HalMemory::PsramBuffer text;  // NUL-terminated
   size_t textLen = 0;
   HalMemory::PsramBuffer linkTable;

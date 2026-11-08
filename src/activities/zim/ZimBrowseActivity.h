@@ -19,6 +19,11 @@
 class ZimBrowseActivity final : public UiListActivity {
  public:
   explicit ZimBrowseActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string path);
+  // After waking from sleep: open this article (archive path) on this page once the archive is ready.
+  void resumeAt(std::string articlePath, int page) {
+    resumePath_ = std::move(articlePath);
+    resumePage_ = page;
+  }
 
   void onEnter() override;
   void onExit() override;
@@ -40,7 +45,7 @@ class ZimBrowseActivity final : public UiListActivity {
   void openArticle(size_t row);
   void openMainPage();
   // Shows a converted article in the viewer; links inside it open through openLinkTarget().
-  void showArticle(ZimArticle&& article);
+  void showArticle(ZimArticle&& article, int startPage = 0);
   // Reads and converts the article behind an archive path (a link target). Releases the cluster
   // buffers afterwards, so earlier viewers on the stack keep only their own text.
   bool openLinkTarget(std::string_view path, ZimArticle& out);
@@ -54,6 +59,8 @@ class ZimBrowseActivity final : public UiListActivity {
   void setStatus(const char* text);
 
   std::string path_;
+  std::string resumePath_;
+  int resumePage_ = 0;
   std::string title_;
   std::string status_;  // shown beside the Search row: last timing or last error
   bool ready_ = false;

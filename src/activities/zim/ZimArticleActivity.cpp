@@ -38,8 +38,18 @@ ZimArticleActivity::ZimArticleActivity(GfxRenderer& renderer, MappedInputManager
 void ZimArticleActivity::onEnter() {
   Activity::onEnter();
   layoutFailed_ = !layout();
+  if (!layoutFailed_ && startPage_ > 0) currentPage_ = std::clamp(startPage_, 0, totalPages_ - 1);
   if (layoutFailed_) showMessage(StrId::STR_DICT_LOW_MEMORY);
   requestUpdate();
+}
+
+bool ZimArticleActivity::sleepResume(SleepResume& out) const {
+  if (resumeKind_ == 0 || article_.path.empty()) return false;
+  out.kind = resumeKind_;
+  out.container = resumeContainer_;
+  out.target = article_.path;
+  out.page = currentPage_;
+  return true;
 }
 
 void ZimArticleActivity::onExit() {
@@ -242,7 +252,8 @@ void ZimArticleActivity::showLinks() {
     return;
   }
   chosenLink_ = -1;
-  auto list = makeUniqueNoThrow<ZimLinkListActivity>(renderer, mappedInput, tr(STR_ZIM_LINKS), std::move(labels), &chosenLink_);
+  auto list =
+      makeUniqueNoThrow<ZimLinkListActivity>(renderer, mappedInput, tr(STR_ZIM_LINKS), std::move(labels), &chosenLink_);
   if (!list) {
     LOG_ERR("ZIM", "OOM: link list");
     showMessage(StrId::STR_DICT_LOW_MEMORY);
@@ -318,6 +329,7 @@ void ZimArticleActivity::followPendingLink() {
     showMessage(StrId::STR_DICT_LOW_MEMORY);
     return;
   }
+  viewer->setResumeContext(resumeKind_, resumeContainer_);
   startActivityForResult(std::move(viewer), [](const ActivityResult&) {});
 }
 
@@ -334,12 +346,11 @@ void ZimArticleActivity::loop() {
     const int row = pendingContents_;
     pendingContents_ = -1;
     if (row == 0) {
-      startActivityForResult(
-          makeUniqueNoThrow<EpubReaderPercentSelectionActivity>(renderer, mappedInput,
-                                                                currentPage_ * 100 / std::max(1, totalPages_ - 1)),
-          [this](const ActivityResult& result) {
-            if (!result.isCancelled) jumpToPercent(std::get<PercentResult>(result.data).percent);
-          });
+      startActivityForResult(makeUniqueNoThrow<EpubReaderPercentSelectionActivity>(
+                                 renderer, mappedInput, currentPage_ * 100 / std::max(1, totalPages_ - 1)),
+                             [this](const ActivityResult& result) {
+                               if (!result.isCancelled) jumpToPercent(std::get<PercentResult>(result.data).percent);
+                             });
     } else if (static_cast<size_t>(row) <= contentLines_.size()) {
       currentPage_ = std::min<int>(contentLines_[row - 1] / linesPerPage_, totalPages_ - 1);
       requestUpdate();
@@ -382,8 +393,8 @@ void ZimArticleActivity::loop() {
 }
 
 // Horizontal extent of `link` on `line`, relative to the text origin `originX`.
-bool ZimArticleActivity::linkExtent(const Line& line, const ZimArticle::Link& link, const int fontId,
-                                    const int originX, int& x0, int& x1) const {
+bool ZimArticleActivity::linkExtent(const Line& line, const ZimArticle::Link& link, const int fontId, const int originX,
+                                    int& x0, int& x1) const {
   const size_t len = std::min<size_t>(line.len, MAX_LINE_BYTES);
   const uint32_t lineEnd = line.start + static_cast<uint32_t>(len);
   if (link.end <= line.start || link.start >= lineEnd) return false;
@@ -443,7 +454,8 @@ void ZimArticleActivity::drawBody(const int fontId, const int x, const int start
     for (size_t k = 0; k < article_.linkCount; ++k) {
       int x0 = 0;
       int x1 = 0;
-      if (linkExtent(line, links[k], fontId, x, x0, x1)) renderer.drawLine(x0, y + glyphHeight - 2, x1, y + glyphHeight - 2);
+      if (linkExtent(line, links[k], fontId, x, x0, x1))
+        renderer.drawLine(x0, y + glyphHeight - 2, x1, y + glyphHeight - 2);
     }
   }
 }

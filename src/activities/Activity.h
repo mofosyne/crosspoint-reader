@@ -1,4 +1,5 @@
 #pragma once
+
 #include <Logging.h>
 
 #include <cassert>
@@ -11,6 +12,7 @@
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
 #include "RenderLock.h"
+#include "activities/SleepResume.h"
 #include "util/ScreenshotInfo.h"
 
 class Activity {
@@ -56,6 +58,9 @@ class Activity {
   // transitions so no filesystem code races a raw SD-card owner.
   virtual bool requiresExclusiveStorageLoop() const { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // Returns true for a viewer that can be reopened after deep sleep; this also makes the panel keep
+  // its page on screen while asleep.
+  virtual bool sleepResume(SleepResume&) const { return false; }
   virtual bool acceptsRemoteInput() const { return false; }
   // Returns true when the activity schedules its own forced refresh.
   virtual bool handleForcedRefresh() { return false; }

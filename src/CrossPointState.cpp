@@ -45,6 +45,10 @@ void CrossPointState::toJson(JsonDocument& doc) const {
   doc["readerActivityLoadCount"] = readerActivityLoadCount;
   doc["lastSleepFromReader"] = lastSleepFromReader;
   doc["showBootScreen"] = showBootScreen;
+  doc["resumeKind"] = resumeKind;
+  doc["resumeContainer"] = resumeContainer;
+  doc["resumeTarget"] = resumeTarget;
+  doc["resumePage"] = resumePage;
 }
 
 bool CrossPointState::fromJson(JsonVariantConst doc) {
@@ -59,5 +63,9 @@ bool CrossPointState::fromJson(JsonVariantConst doc) {
   readerActivityLoadCount = doc["readerActivityLoadCount"] | static_cast<uint8_t>(0);
   lastSleepFromReader = doc["lastSleepFromReader"] | false;
   showBootScreen = doc["showBootScreen"] | true;
+  resumeKind = doc["resumeKind"] | static_cast<uint8_t>(0);
+  resumeContainer = doc["resumeContainer"] | "";
+  resumeTarget = doc["resumeTarget"] | "";
+  resumePage = doc["resumePage"] | 0;
   return true;
 }

@@ -65,8 +65,15 @@ void ZimBrowseActivity::onEnter() {
   LOG_INF("ZIM", "Opened %s: ns=%c, first page in %lu ms", path_.c_str(), browser_->contentNamespace(), millis() - t0);
   hasMainPage_ = browser_->hasMainPage();
   ready_ = true;
-  RenderLock lock(*this);
-  rebuildRows();
+  {
+    RenderLock lock(*this);
+    rebuildRows();
+  }
+  if (!resumePath_.empty()) {
+    ZimArticle article;
+    if (openLinkTarget(resumePath_, article)) showArticle(std::move(article), resumePage_);
+    resumePath_.clear();
+  }
 }
 
 void ZimBrowseActivity::onExit() {
@@ -272,8 +279,9 @@ void ZimBrowseActivity::openMainPage() {
 
 bool ZimBrowseActivity::convertBlob(zim::Blob& blob, std::string headword, ZimArticle& out) {
   const unsigned long t0 = millis();
-  const bool ok =
-      collector_->build(blob, std::move(headword), browser_->lastArticlePath(), browser_->contentNamespace(), out);
+  const std::string path = browser_->lastArticlePath();
+  const bool ok = collector_->build(blob, std::move(headword), path, browser_->contentNamespace(), out);
+  if (ok) out.path = path.size() > 2 && path[1] == '/' ? path.substr(2) : path;  // as readPath() wants it
   loader_->release();  // the 2-4 MiB cluster buffers are not needed while the article is on screen
   if (ok) LOG_DBG("ZIM", "Converted in %lu ms", millis() - t0);
   return ok;
@@ -295,7 +303,7 @@ bool ZimBrowseActivity::openLinkTarget(const std::string_view path, ZimArticle& 
   return ok;
 }
 
-void ZimBrowseActivity::showArticle(ZimArticle&& article) {
+void ZimBrowseActivity::showArticle(ZimArticle&& article, int startPage) {
   auto viewer = makeUniqueNoThrow<ZimArticleActivity>(
       renderer, mappedInput, std::move(article),
       [this](std::string_view path, ZimArticle& out) { return openLinkTarget(path, out); });
@@ -303,6 +311,8 @@ void ZimBrowseActivity::showArticle(ZimArticle&& article) {
     LOG_ERR("ZIM", "OOM: article viewer");
     return;
   }
+  viewer->setResumeContext(1, path_);
+  viewer->setStartPage(startPage);
   startActivityForResult(std::move(viewer), [](const ActivityResult&) {});
 }
 

@@ -19,6 +19,6 @@ bool loadViewerArticle(std::string_view url, ZimArticle& out, bool markAsRead = 
 // A viewer for a saved article. Links to other saved articles open on top of it; links to anything
 // else report "not found" (the page was not part of a sync).
 std::unique_ptr<Activity> makeArticleViewer(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                            const std::string& url);
+                                            const std::string& url, int startPage = 0);
 
 }  // namespace feeds

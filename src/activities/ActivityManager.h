@@ -12,6 +12,7 @@
 
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "activities/SleepResume.h"
 #include "settings/SettingsSection.h"
 #include "util/ScreenshotInfo.h"
 
@@ -113,6 +114,7 @@ class ActivityManager {
   bool preventAutoSleep() const;
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
+  bool sleepResume(SleepResume& out) const;
   // Bluetooth page turner (lib/BlePageTurner): the book in front, whether it has painted a page, and
   // a page or chapter turn from a remote. False when no book in front took the turn.
   bool isForegroundReader() const;

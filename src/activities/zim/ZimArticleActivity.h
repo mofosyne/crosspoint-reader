@@ -26,6 +26,14 @@ class ZimArticleActivity final : public Activity {
   ZimArticleActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, ZimArticle article, Opener opener,
                      int depth = 0);
 
+  // Where this viewer can be reopened after sleep: `kind` 1 = ZIM (container = archive file), 2 = feed.
+  void setResumeContext(uint8_t kind, std::string container) {
+    resumeKind_ = kind;
+    resumeContainer_ = std::move(container);
+  }
+  void setStartPage(int page) { startPage_ = page; }
+  bool sleepResume(SleepResume& out) const override;
+
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -69,6 +77,9 @@ class ZimArticleActivity final : public Activity {
   ZimArticle article_;
   Opener opener_;
   const int depth_;
+  uint8_t resumeKind_ = 0;
+  std::string resumeContainer_;
+  int startPage_ = 0;
 
   HalMemory::PsramBuffer lines_;
   size_t lineCount_ = 0;

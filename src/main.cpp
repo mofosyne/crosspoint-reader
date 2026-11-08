@@ -47,6 +47,7 @@
 #endif
 #if CROSSPOINT_FEEDS
 #include "activities/feeds/FeedsActivity.h"
+#include "feeds/FeedArticleView.h"
 #include "feeds/FeedStore.h"
 #endif
 #include "WifiCredentialStore.h"
@@ -481,6 +482,12 @@ static bool holdSleepWhileUsbPowered() {
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  SleepResume viewer;
+  const bool viewerOpen = activityManager.sleepResume(viewer);
+  APP_STATE.resumeKind = viewerOpen ? viewer.kind : 0;
+  APP_STATE.resumeContainer = viewer.container;
+  APP_STATE.resumeTarget = viewer.target;
+  APP_STATE.resumePage = viewer.page;
 
   // Sleep may end in a power-off (battery death, latch); persist the clock
   // floor now so a later cold boot resumes from it.
@@ -493,7 +500,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   deliverSleepPluginEvents(bluetoothStopped);
 
   const bool isQuickResumeSleep =
-      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
+      viewerOpen || SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
   // Every sleep mode leaves a complete retained frame on the e-ink panel. Keep
@@ -836,6 +843,31 @@ void setup() {
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
+  } else if (APP_STATE.resumeKind != 0 && !mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
+    // A ZIM or feed article was open at sleep: reopen it. The record is cleared first so a crash
+    // while loading it cannot repeat on every boot.
+    const auto kind = APP_STATE.resumeKind;
+    const auto container = APP_STATE.resumeContainer;
+    const auto target = APP_STATE.resumeTarget;
+    const int page = APP_STATE.resumePage;
+    APP_STATE.resumeKind = 0;
+    APP_STATE.saveToFile();
+    std::unique_ptr<Activity> viewer;
+#if CROSSPOINT_ZIM
+    if (kind == 1) {
+      auto browse = std::make_unique<ZimBrowseActivity>(renderer, mappedInputManager, container);
+      browse->resumeAt(target, page);
+      viewer = std::move(browse);
+    }
+#endif
+#if CROSSPOINT_FEEDS
+    if (kind == 2) viewer = feeds::makeArticleViewer(renderer, mappedInputManager, target, page);
+#endif
+    if (viewer) {
+      activityManager.replaceActivity(std::move(viewer));
+    } else {
+      activityManager.goHome(HomeMenuItem::NONE, needsWakeRefresh);
+    }
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
@@ -902,6 +934,10 @@ static void sendDebugText(const char* tag, const std::string& text) {
 #endif
 
 static void handleCommand(const String& cmd) {
+  if (cmd == "SLEEP") {  // go to deep sleep as the idle timeout would
+    enterDeepSleep(false);
+    return;
+  }
   if (cmd == "SCREENSHOT") {
     sendScreenshot();
     return;

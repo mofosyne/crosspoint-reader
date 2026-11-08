@@ -21,6 +21,11 @@ class CrossPointState : public PersistableStore<CrossPointState> {
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   bool showBootScreen = true;
+  // The viewer open at the last sleep (see Activity::SleepResume); kind 0 = none.
+  uint8_t resumeKind = 0;
+  std::string resumeContainer;
+  std::string resumeTarget;
+  int32_t resumePage = 0;
 
   static const char* getFilePath() { return "/.crosspoint/state.json"; }
   void toJson(JsonDocument& doc) const;
