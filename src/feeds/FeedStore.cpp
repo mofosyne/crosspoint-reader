@@ -53,6 +53,18 @@ bool saveState(const std::string& sourceId, const SourceState& state) {
   return ok && Storage.replaceFile(tmp.c_str(), statePath(sourceId).c_str());
 }
 
+bool pagesBlocked(const std::string& sourceId) {
+  return Storage.exists((std::string(STATE_DIR) + "/" + sourceId + ".blocked").c_str());
+}
+
+void setPagesBlocked(const std::string& sourceId) {
+  Storage.ensureDirectoryExists(STATE_DIR);
+  HalFile f;
+  if (!Storage.openFileForWrite(TAG, std::string(STATE_DIR) + "/" + sourceId + ".blocked", f)) return;
+  f.write("1", 1);
+  f.close();
+}
+
 bool saveArticle(const feed::CachedArticle& article) {
   Storage.ensureDirectoryExists("/feeds");
   Storage.ensureDirectoryExists(ITEMS_DIR);

@@ -43,6 +43,8 @@ class FeedSync {
     std::string title;
     std::string commentsUrl;
     int64_t published = 0;
+    std::string fallbackText;  // content=auto: what to keep if the site turns out to refuse page fetches
+    std::string feedText;      // set when the feed text is used and only the comments are still to fetch
   };
 
   void startSource(size_t index);
@@ -68,6 +70,9 @@ class FeedSync {
   std::vector<Pending> pending_;
   size_t pendingAt_ = 0;
   int64_t now_ = 0;
+  bool pagesBlocked_ = false;  // this source refuses page fetches, see pagesBlocked()
+  int blockedHits_ = 0;
+  int pagesRead_ = 0;
 
   HalMemory::PsramBuffer fetchBuf_;  // page bodies
   size_t fetchCap_ = 0;

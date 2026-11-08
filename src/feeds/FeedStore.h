@@ -28,6 +28,10 @@ struct SourceState {
 };
 bool loadState(const std::string& sourceId, SourceState& out);  // false: never checked (state left empty)
 bool saveState(const std::string& sourceId, const SourceState& state);
+// A source whose pages refuse the reader (bot challenge, 401/403): content=auto then keeps to the
+// feed's own text. The mark lives next to the state and goes away with it.
+bool pagesBlocked(const std::string& sourceId);
+void setPagesBlocked(const std::string& sourceId);
 
 bool saveArticle(const feed::CachedArticle& article);  // writes through a temp file, then renames
 

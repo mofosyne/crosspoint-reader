@@ -12,6 +12,7 @@
 #include <cstring>
 #include <ctime>
 
+#include "CrossPointSettings.h"
 #include "network/HttpDownloader.h"
 #include "util/Dictionary.h"
 #include "util/HtmlToPlainText.h"
@@ -20,9 +21,10 @@ namespace feeds {
 namespace {
 
 constexpr const char* TAG = "FEED";
-constexpr size_t FETCH_CAP = 1536 * 1024;  // a page body beyond this is cut
-constexpr size_t WORK_CAP = 1536 * 1024;   // converted text of one article
-constexpr size_t MIN_FEED_TEXT = 800;      // content=auto: a shorter feed text means "fetch the page"
+constexpr size_t FETCH_CAP = 1536 * 1024;            // a page body beyond this is cut
+constexpr size_t WORK_CAP = 1536 * 1024;             // converted text of one article
+constexpr size_t MIN_FEED_TEXT = 800;                // content=auto: a shorter feed text means "fetch the page"
+constexpr size_t DEFERRED_FEED_TEXT_CAP = 6 * 1024;  // feed text kept while its comments wait to be fetched
 constexpr size_t FEED_SUMMARY_CAP = 40 * 1024;
 constexpr unsigned long HN_DEADLINE_MS = 60000;     // the comment JSON of a busy story is large
 constexpr size_t COMMENT_TEXT_CAP = 4096;           // text kept per comment of a comment feed
@@ -128,6 +130,9 @@ void FeedSync::startSource(size_t index) {
   const feed::Source& source = due_[index];
   status_.headline = "Checking " + source.name;
   loadState(source.id, state_);
+  pagesBlocked_ = pagesBlocked(source.id);
+  blockedHits_ = 0;
+  pagesRead_ = 0;
   pending_.clear();
   pendingAt_ = 0;
   sourceOpen_ = true;
@@ -202,12 +207,22 @@ void FeedSync::checkFeed(const feed::Source& source) {
         if (considered++ >= static_cast<size_t>(source.limit)) return false;
         if (state_.seen.contains(item.url)) return true;
         const bool longEnough = item.summary.size() >= MIN_FEED_TEXT;
-        const bool useFeedText =
-            source.content == feed::ContentMode::Feed || (source.content == feed::ContentMode::Auto && longEnough);
+        // Without the preload setting, Auto keeps to what the feed carries and never fetches the page.
+        const bool feedOnly =
+            source.content == feed::ContentMode::Auto && (!SETTINGS.feedPreloadPages || pagesBlocked_);
+        const bool useFeedText = source.content == feed::ContentMode::Feed ||
+                                 (source.content == feed::ContentMode::Auto && (longEnough || feedOnly));
         Pending p{item.url, item.title, item.commentsUrl, item.published};
-        if (useFeedText && !item.summary.empty() && source.comments == feed::CommentsMode::None) {
-          if (saveItem(source, p, item.summary, /*fragment=*/true)) state_.seen.add(item.url);
+        std::string text = item.summary;
+        if (text.empty() && feedOnly) text = "<p>" + item.url + "</p>";  // nothing but the link to keep
+        if (useFeedText && !text.empty() && source.comments == feed::CommentsMode::None) {
+          if (saveItem(source, p, text, /*fragment=*/true)) state_.seen.add(item.url);
         } else {
+          // The comments come from a second request, which can't run inside this download.
+          if (useFeedText && !text.empty()) p.feedText = text.substr(0, DEFERRED_FEED_TEXT_CAP);
+          if (!useFeedText && source.content == feed::ContentMode::Auto) {
+            p.fallbackText = item.summary.empty() ? "<p>" + item.url + "</p>" : item.summary.substr(0, MIN_FEED_TEXT);
+          }
           pending_.push_back(std::move(p));  // the page (and comments) are fetched afterwards
         }
         return true;
@@ -304,10 +319,26 @@ void FeedSync::readPending() {
   }
   std::string_view page;
   std::string note;  // stands in for the page when it can't be read but there are comments to keep
-  if (isBinaryUrl(item.url)) {
+  const std::string* feedText = item.feedText.empty() ? nullptr : &item.feedText;
+  if (!feedText && pagesBlocked_ && !item.fallbackText.empty()) feedText = &item.fallbackText;
+  if (feedText) {
+    // the feed's own text stands in for the page
+  } else if (isBinaryUrl(item.url)) {
     note = "<p>This link is a file, not a web page: " + item.url + "</p>";
   } else if (!fetchToBuffer(item.url, page)) {
-    note = "<p>The page could not be fetched (" + status_.detail + "). Link: " + item.url + "</p>";
+    const int status = HttpDownloader::lastStatus();
+    if ((status == 401 || status == 403 || status == 429) && source.content == feed::ContentMode::Auto) {
+      // Two refusals and no page read this run: stop asking this site for pages.
+      if (++blockedHits_ >= 2 && pagesRead_ == 0 && !pagesBlocked_) {
+        pagesBlocked_ = true;
+        setPagesBlocked(source.id);
+        LOG_INF(TAG, "%s refuses page fetches, keeping to feed text", source.name.c_str());
+      }
+      if (!item.fallbackText.empty()) feedText = &item.fallbackText;
+    }
+    if (!feedText) note = "<p>The page could not be fetched (" + status_.detail + "). Link: " + item.url + "</p>";
+  } else {
+    ++pagesRead_;
   }
   const bool hasComments = source.comments == feed::CommentsMode::Link && !item.commentsUrl.empty();
   if (!note.empty() && !hasComments) {
@@ -315,9 +346,10 @@ void FeedSync::readPending() {
     ++status_.failed;
     return;
   }
-  const std::string_view main =
-      note.empty() ? feed::dropLeadingTitle(feed::extractMainContent(page), item.title) : std::string_view(note);
-  if (saveItem(source, item, main, /*fragment=*/false)) {
+  const std::string_view main = feedText       ? std::string_view(*feedText)
+                                : note.empty() ? feed::dropLeadingTitle(feed::extractMainContent(page), item.title)
+                                               : std::string_view(note);
+  if (saveItem(source, item, main, /*fragment=*/feedText != nullptr)) {
     state_.seen.add(item.url);
   } else {
     ++status_.failed;
