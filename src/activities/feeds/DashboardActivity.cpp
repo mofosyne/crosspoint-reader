@@ -27,6 +27,7 @@ void DashboardActivity::onEnter() {
 
 void DashboardActivity::reload() {
   RenderLock lock(*this);
+  config_ = feeds::loadDashboardConfig();
   weather_ = feed::Weather{};
   weatherFetched_ = 0;
   std::string json;
@@ -52,7 +53,11 @@ void DashboardActivity::loop() {
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     auto sync = makeUniqueNoThrow<FeedSyncActivity>(renderer, mappedInput, /*checkAll=*/false);
-    if (sync) startActivityForResult(std::move(sync), [this](const ActivityResult&) { reload(); requestUpdate(); });
+    if (sync)
+      startActivityForResult(std::move(sync), [this](const ActivityResult&) {
+        reload();
+        requestUpdate();
+      });
   }
 }
 
@@ -85,40 +90,47 @@ void DashboardActivity::render(RenderLock&&) {
   };
 
   // ---- weather
-  heading("MELBOURNE");
-  if (weather_.days.empty()) {
-    renderer.drawText(UI_12_FONT_ID, x, y, "No forecast yet. Press Sync.", true);
-    y += lineHeight;
-  } else {
-    if (weather_.hasNow) {
-      const std::string temp = std::to_string(weather_.nowC) + "\xC2\xB0";
-      renderer.drawText(NOTOSANS_18_FONT_ID, x, y, temp.c_str(), true, EpdFontFamily::BOLD);
-      const int tempWidth = renderer.getTextWidth(NOTOSANS_18_FONT_ID, temp.c_str(), EpdFontFamily::BOLD);
-      renderer.drawText(UI_12_FONT_ID, x + tempWidth + 12, y + 6, feed::weatherText(weather_.nowCode), true);
-      y += renderer.getLineHeight(NOTOSANS_18_FONT_ID) + 4;
-    }
-    for (const auto& day : weather_.days) {
-      const std::string name = feed::weekdayName(day.date);
-      const std::string range = std::to_string(day.minC) + "-" + std::to_string(day.maxC) + "\xC2\xB0";
-      const std::string rain = std::to_string(day.rainPercent) + "%";
-      renderer.drawText(UI_12_FONT_ID, x, y, name.c_str(), true);
-      renderer.drawText(UI_12_FONT_ID, x + 60, y, renderer.truncatedText(UI_12_FONT_ID, feed::weatherText(day.code), textWidth - 230).c_str(), true);
-      renderer.drawText(UI_12_FONT_ID, width - x - 160, y, range.c_str(), true);
-      renderer.drawText(UI_12_FONT_ID, width - x - renderer.getTextWidth(UI_12_FONT_ID, rain.c_str()), y, rain.c_str(), true);
+  if (config_.weather) {
+    std::string place = config_.name;
+    for (auto& c : place) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
+    heading(place.c_str());
+    if (weather_.days.empty()) {
+      renderer.drawText(UI_12_FONT_ID, x, y, "No forecast yet. Press Sync.", true);
       y += lineHeight;
+    } else {
+      if (weather_.hasNow) {
+        const std::string temp = std::to_string(weather_.nowC) + "\xC2\xB0";
+        renderer.drawText(NOTOSANS_18_FONT_ID, x, y, temp.c_str(), true, EpdFontFamily::BOLD);
+        const int tempWidth = renderer.getTextWidth(NOTOSANS_18_FONT_ID, temp.c_str(), EpdFontFamily::BOLD);
+        renderer.drawText(UI_12_FONT_ID, x + tempWidth + 12, y + 6, feed::weatherText(weather_.nowCode), true);
+        y += renderer.getLineHeight(NOTOSANS_18_FONT_ID) + 4;
+      }
+      for (const auto& day : weather_.days) {
+        const std::string name = feed::weekdayName(day.date);
+        const std::string range = std::to_string(day.minC) + "-" + std::to_string(day.maxC) + "\xC2\xB0";
+        const std::string rain = std::to_string(day.rainPercent) + "%";
+        renderer.drawText(UI_12_FONT_ID, x, y, name.c_str(), true);
+        renderer.drawText(UI_12_FONT_ID, x + 60, y,
+                          renderer.truncatedText(UI_12_FONT_ID, feed::weatherText(day.code), textWidth - 230).c_str(),
+                          true);
+        renderer.drawText(UI_12_FONT_ID, width - x - 160, y, range.c_str(), true);
+        renderer.drawText(UI_12_FONT_ID, width - x - renderer.getTextWidth(UI_12_FONT_ID, rain.c_str()), y,
+                          rain.c_str(), true);
+        y += lineHeight;
+      }
+      if (weatherFetched_ > CLOCK_SET_AFTER) {
+        struct tm local;
+        const time_t fetched = static_cast<time_t>(weatherFetched_);
+        localtime_r(&fetched, &local);
+        char stamp[32];
+        strftime(stamp, sizeof(stamp), "Updated %a %H:%M", &local);
+        renderer.drawText(UI_10_FONT_ID, x, y, stamp, true);
+        y += smallHeight;
+      }
     }
-    if (weatherFetched_ > CLOCK_SET_AFTER) {
-      struct tm local;
-      const time_t fetched = static_cast<time_t>(weatherFetched_);
-      localtime_r(&fetched, &local);
-      char stamp[32];
-      strftime(stamp, sizeof(stamp), "Updated %a %H:%M", &local);
-      renderer.drawText(UI_10_FONT_ID, x, y, stamp, true);
-      y += smallHeight;
-    }
+    y += metrics.verticalSpacing;
+    rule();
   }
-  y += metrics.verticalSpacing;
-  rule();
 
   // ---- feeds
   heading("FEEDS");
@@ -128,16 +140,18 @@ void DashboardActivity::render(RenderLock&&) {
   }
   for (const auto& source : sources_) {
     const std::string count = std::to_string(source.unread);
-    renderer.drawText(UI_12_FONT_ID, x, y, renderer.truncatedText(UI_12_FONT_ID, source.name.c_str(), textWidth - 60).c_str(), true);
-    renderer.drawText(UI_12_FONT_ID, width - x - renderer.getTextWidth(UI_12_FONT_ID, count.c_str()), y, count.c_str(), true,
-                      source.unread > 0 ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    renderer.drawText(UI_12_FONT_ID, x, y,
+                      renderer.truncatedText(UI_12_FONT_ID, source.name.c_str(), textWidth - 60).c_str(), true);
+    renderer.drawText(UI_12_FONT_ID, width - x - renderer.getTextWidth(UI_12_FONT_ID, count.c_str()), y, count.c_str(),
+                      true, source.unread > 0 ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
     y += lineHeight;
   }
   y += metrics.verticalSpacing;
   const int limit = renderer.getScreenHeight() - metrics.buttonHintsHeight - lineHeight;
   for (const auto& title : headlines_) {
     if (y > limit) break;
-    renderer.drawText(UI_10_FONT_ID, x, y, renderer.truncatedText(UI_10_FONT_ID, title.c_str(), textWidth).c_str(), true);
+    renderer.drawText(UI_10_FONT_ID, x, y, renderer.truncatedText(UI_10_FONT_ID, title.c_str(), textWidth).c_str(),
+                      true);
     y += smallHeight;
   }
 

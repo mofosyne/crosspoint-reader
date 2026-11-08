@@ -1,5 +1,6 @@
 #pragma once
 
+#include <DashboardFile.h>
 #include <Weather.h>
 
 #include <string>
@@ -27,6 +28,7 @@ class DashboardActivity final : public Activity {
 
   void reload();
 
+  feed::DashboardConfig config_;
   feed::Weather weather_;
   int64_t weatherFetched_ = 0;
   std::vector<SourceLine> sources_;

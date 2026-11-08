@@ -9,6 +9,7 @@
 #include "CachedArticle.h"
 #include "CommentFeed.h"
 #include "ContentExtract.h"
+#include "DashboardFile.h"
 #include "FeedDate.h"
 #include "FeedParser.h"
 #include "HnComments.h"
@@ -671,4 +672,28 @@ TEST(Weather, NamesTheWeekday) {
   EXPECT_EQ(feed::weekdayName("2024-02-29"), "Thu");
   EXPECT_EQ(feed::weekdayName("garbage"), "");
   EXPECT_STREQ(feed::weatherText(61), "Light rain");
+}
+
+TEST(DashboardFile, DefaultsToMelbourne) {
+  const auto c = feed::parseDashboard("");
+  EXPECT_TRUE(c.weather);
+  EXPECT_EQ(c.name, "Melbourne");
+  EXPECT_EQ(c.days, 4);
+  EXPECT_TRUE(c.errors.empty());
+}
+
+TEST(DashboardFile, ReadsAPlaceAndComments) {
+  const auto c = feed::parseDashboard("# my place\nweather 51.5 -0.12 name=\"New London\" days=9  # a week\n");
+  EXPECT_TRUE(c.weather);
+  EXPECT_DOUBLE_EQ(c.latitude, 51.5);
+  EXPECT_DOUBLE_EQ(c.longitude, -0.12);
+  EXPECT_EQ(c.name, "New London");
+  EXPECT_EQ(c.days, 7);  // clamped
+  EXPECT_TRUE(c.errors.empty());
+}
+
+TEST(DashboardFile, CanTurnTheForecastOffAndReportsMistakes) {
+  const auto c = feed::parseDashboard("weather off\nweather 100 0\nsnow 1 2\n");
+  EXPECT_FALSE(c.weather);
+  EXPECT_EQ(c.errors.size(), 2u);
 }

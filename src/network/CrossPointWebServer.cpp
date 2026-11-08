@@ -40,6 +40,9 @@
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
+#if CROSSPOINT_FEEDS
+#include "FeedsWeb.h"
+#endif
 #include "OpdsServerStore.h"
 #include "ProtectedPaths.h"
 #include "SdCardFontSystem.h"
@@ -356,6 +359,12 @@ class CrossPointWebServer::RouteHandler final : public RequestHandler {
         {"/api/fetch", HTTP_POST, [](S& s) { s.handleFetch(); }, nullptr},
         {"/api/book-key", HTTP_POST, [](S& s) { s.handleBookKey(); }, nullptr},
         {"/api/plugin-fs", HTTP_POST, [](S& s) { s.handlePluginFs(); }, [](S& s) { s.handlePluginFsUpload(); }},
+
+#if CROSSPOINT_FEEDS
+        {"/feeds", HTTP_GET, [](S& s) { sendFeedsPage(*s.server); }, nullptr},
+        {"/api/feeds/file", HTTP_GET, [](S& s) { handleFeedsFile(*s.server); }, nullptr},
+        {"/api/feeds/file", HTTP_POST, [](S& s) { handleFeedsFile(*s.server); }, nullptr},
+#endif
 
         {"/api/wifi", HTTP_GET, [](S& s) { s.handleGetWifiNetworks(); }, nullptr},
         {"/api/wifi", HTTP_POST, [](S& s) { s.handlePostWifiNetwork(); }, nullptr},

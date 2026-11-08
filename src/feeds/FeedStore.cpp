@@ -36,6 +36,12 @@ bool loadSources(feed::SourcesParse& out) {
   return true;
 }
 
+feed::DashboardConfig loadDashboardConfig() {
+  std::string text;
+  if (!Storage.readFileToString(TAG, DASHBOARD_PATH, 4096, text)) return feed::DashboardConfig{};
+  return feed::parseDashboard(text);
+}
+
 bool loadState(const std::string& sourceId, SourceState& out) {
   out = SourceState{};
   std::string blob;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <CachedArticle.h>
+#include <DashboardFile.h>
 #include <HalMemory.h>
 #include <SeenSet.h>
 #include <SourcesFile.h>
@@ -16,12 +17,16 @@
 namespace feeds {
 
 constexpr const char* SOURCES_PATH = "/feeds/sources.txt";
+constexpr const char* DASHBOARD_PATH = "/feeds/dashboard.txt";
 
 // File name part of an article: 16 hex digits of the URL's hash.
 std::string itemName(const std::string& url);
 std::string itemPath(const std::string& url);
 
 bool loadSources(feed::SourcesParse& out);  // false when the file is missing or unreadable
+
+// The dashboard settings; the defaults when the file is missing.
+feed::DashboardConfig loadDashboardConfig();
 
 struct SourceState {
   feed::SeenSet seen;
