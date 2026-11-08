@@ -1,4 +1,19 @@
-# CrossPoint Reader
+# CrossPoint Reader (mofosyne fork)
+
+> **This is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader).**
+> It is not upstream and is unlikely to be upstreamed (`SCOPE.md` rejects RSS readers). Everything below this
+> banner is upstream's documentation. Additions in this fork, mainly for the Seeed reTerminal Sticky (ESP32-S3, PSRAM):
+>
+> - **ZIM reader**: browse and read offline archives such as Wikipedia from the SD card (`CROSSPOINT_ZIM`).
+> - **Feed reader**: RSS, Atom, sitemap and index-page sources, manual sync, Hacker News and WordPress comments,
+>   cached articles in the same viewer (`CROSSPOINT_FEEDS`). Sources live in `/feeds/sources.txt`.
+> - **Dashboard**: date, Open-Meteo forecast and unread headlines, set up in `/feeds/dashboard.txt`.
+> - **Web editor** for both files at `/feeds` while File Transfer is running.
+> - **Sleep resume**: ZIM and feed articles stay on screen while asleep and reopen on wake.
+> - Debug console commands for driving a Sticky over serial (`CROSSPOINT_SERIAL_INPUT`).
+>
+> Branches: `main` is this fork; `develop` mirrors upstream.
+
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
 
