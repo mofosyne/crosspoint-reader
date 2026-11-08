@@ -6,6 +6,7 @@
 #include <HnComments.h>
 #include <LinkExtractor.h>
 #include <Logging.h>
+#include <Weather.h>
 #include <WiFi.h>
 
 #include <algorithm>
@@ -21,9 +22,11 @@ namespace feeds {
 namespace {
 
 constexpr const char* TAG = "FEED";
-constexpr size_t FETCH_CAP = 1536 * 1024;            // a page body beyond this is cut
-constexpr size_t WORK_CAP = 1536 * 1024;             // converted text of one article
-constexpr size_t MIN_FEED_TEXT = 800;                // content=auto: a shorter feed text means "fetch the page"
+constexpr size_t FETCH_CAP = 1536 * 1024;    // a page body beyond this is cut
+constexpr size_t WORK_CAP = 1536 * 1024;     // converted text of one article
+constexpr size_t MIN_FEED_TEXT = 800;        // content=auto: a shorter feed text means "fetch the page"
+constexpr double WEATHER_LATITUDE = -37.81;  // Melbourne
+constexpr double WEATHER_LONGITUDE = 144.96;
 constexpr size_t DEFERRED_FEED_TEXT_CAP = 6 * 1024;  // feed text kept while its comments wait to be fetched
 constexpr size_t FEED_SUMMARY_CAP = 40 * 1024;
 constexpr unsigned long HN_DEADLINE_MS = 60000;     // the comment JSON of a busy story is large
@@ -104,6 +107,11 @@ bool FeedSync::begin(std::string& error) {
 bool FeedSync::step() {
   if (status_.finished) return false;
   if (!sourceOpen_) {
+    if (current_ >= due_.size() && !weatherDone_) {
+      weatherDone_ = true;
+      fetchWeather();
+      return true;
+    }
     if (current_ >= due_.size()) {
       status_.finished = true;
       status_.headline = "Done";
@@ -124,6 +132,20 @@ bool FeedSync::step() {
   }
   finishSource();
   return true;
+}
+
+// The dashboard's forecast. Failing to get it is not a sync failure: the dashboard keeps the old one.
+void FeedSync::fetchWeather() {
+  status_.headline = "Checking the weather";
+  if (!tlsHeapOk()) return;
+  std::string_view body;
+  if (!fetchToBuffer(feed::openMeteoUrl(WEATHER_LATITUDE, WEATHER_LONGITUDE, 4), body)) return;
+  feed::Weather weather;
+  if (!feed::parseOpenMeteo(body, weather)) {
+    LOG_ERR(TAG, "Weather answer not understood");
+    return;
+  }
+  if (!saveWeather(body, now_)) LOG_ERR(TAG, "Could not save the weather");
 }
 
 void FeedSync::startSource(size_t index) {

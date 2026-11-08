@@ -6,6 +6,7 @@
 
 #include <ctime>
 
+#include "DashboardActivity.h"
 #include "FeedItemListActivity.h"
 #include "FeedSyncActivity.h"
 #include "components/UITheme.h"
@@ -29,6 +30,8 @@ void FeedsActivity::reload() {
   labels_.push_back("Sync now");
   values_.push_back(haveFile_ ? "" : "no sources file");
   labels_.push_back("Check every source");
+  values_.push_back("");
+  labels_.push_back("Dashboard");
   values_.push_back("");
   for (const auto& source : sources_.sources) {
     feeds::SourceState state;
@@ -80,14 +83,31 @@ void FeedsActivity::activateIndex(const int index) {
   if (index < 0 || static_cast<size_t>(index) >= rows_.size()) return;
   if (index == 0 || index == 1) {
     auto sync = makeUniqueNoThrow<FeedSyncActivity>(renderer, mappedInput, /*checkAll=*/index == 1);
-    if (sync) startActivityForResult(std::move(sync), [this](const ActivityResult&) { reload(); requestUpdate(); });
+    if (sync)
+      startActivityForResult(std::move(sync), [this](const ActivityResult&) {
+        reload();
+        requestUpdate();
+      });
     return;
   }
-  const size_t source = static_cast<size_t>(index) - 2;
+  if (index == 2) {
+    auto dashboard = makeUniqueNoThrow<DashboardActivity>(renderer, mappedInput);
+    if (dashboard)
+      startActivityForResult(std::move(dashboard), [this](const ActivityResult&) {
+        reload();
+        requestUpdate();
+      });
+    return;
+  }
+  const size_t source = static_cast<size_t>(index) - 3;
   if (source >= sourceRows_) return;  // a line about a problem in the sources file
   auto list = makeUniqueNoThrow<FeedItemListActivity>(renderer, mappedInput, sources_.sources[source].id,
                                                       sources_.sources[source].name);
-  if (list) startActivityForResult(std::move(list), [this](const ActivityResult&) { reload(); requestUpdate(); });
+  if (list)
+    startActivityForResult(std::move(list), [this](const ActivityResult&) {
+      reload();
+      requestUpdate();
+    });
 }
 
 #ifdef CROSSPOINT_SERIAL_INPUT

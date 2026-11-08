@@ -59,6 +59,7 @@ class FeedSync {
   void appendCommentFeed(const std::string& feedUrl, const Pending& item, char* work, size_t& used,
                          std::vector<feed::CachedArticle::Link>& links);
   void readPending();
+  void fetchWeather();
 
   bool checkAll_;
   Status status_;
@@ -70,6 +71,7 @@ class FeedSync {
   std::vector<Pending> pending_;
   size_t pendingAt_ = 0;
   int64_t now_ = 0;
+  bool weatherDone_ = false;
   bool pagesBlocked_ = false;  // this source refuses page fetches, see pagesBlocked()
   int blockedHits_ = 0;
   int pagesRead_ = 0;

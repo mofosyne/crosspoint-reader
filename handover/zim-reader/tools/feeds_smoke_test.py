@@ -69,7 +69,7 @@ class FeedsSmoke(unittest.TestCase):
         self.dev.wait_state("Home", 30)
         self.cmd("FEEDS", 3)
         self.assertIn("unread", self.dev.state())
-        self.assertTrue(self.dev.do("ROW:2"))  # the HN source
+        self.assertTrue(self.dev.do("ROW:3"))  # the HN source
         time.sleep(3)
         items = self.dev.state()
         self.assertIn("FeedItems", items)

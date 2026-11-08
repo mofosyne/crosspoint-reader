@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace feeds {
@@ -51,6 +52,31 @@ bool saveState(const std::string& sourceId, const SourceState& state) {
   const bool ok = f.write(blob.data(), blob.size()) == blob.size();
   f.close();
   return ok && Storage.replaceFile(tmp.c_str(), statePath(sourceId).c_str());
+}
+
+namespace {
+constexpr const char* WEATHER_PATH = "/feeds/weather.json";
+}
+
+bool saveWeather(std::string_view json, int64_t fetched) {
+  Storage.ensureDirectoryExists("/feeds");
+  const std::string blob = std::to_string(fetched) + "\n" + std::string(json);
+  const std::string tmp = std::string(WEATHER_PATH) + ".tmp";
+  HalFile f;
+  if (!Storage.openFileForWrite(TAG, tmp, f)) return false;
+  const bool ok = f.write(blob.data(), blob.size()) == blob.size();
+  f.close();
+  return ok && Storage.replaceFile(tmp.c_str(), WEATHER_PATH);
+}
+
+bool loadWeather(std::string& json, int64_t& fetched) {
+  std::string blob;
+  if (!Storage.readFileToString(TAG, WEATHER_PATH, 16 * 1024, blob)) return false;
+  const size_t nl = blob.find('\n');
+  if (nl == std::string::npos) return false;
+  fetched = std::strtoll(blob.c_str(), nullptr, 10);
+  json = blob.substr(nl + 1);
+  return true;
 }
 
 bool pagesBlocked(const std::string& sourceId) {

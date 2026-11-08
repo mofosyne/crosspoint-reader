@@ -6,6 +6,7 @@
 #include <SourcesFile.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 // SD card layout of the feed reader (the sources file is written by the user):
@@ -32,6 +33,10 @@ bool saveState(const std::string& sourceId, const SourceState& state);
 // feed's own text. The mark lives next to the state and goes away with it.
 bool pagesBlocked(const std::string& sourceId);
 void setPagesBlocked(const std::string& sourceId);
+
+// The last weather answer for the dashboard, with the time it was fetched.
+bool saveWeather(std::string_view json, int64_t fetched);
+bool loadWeather(std::string& json, int64_t& fetched);
 
 bool saveArticle(const feed::CachedArticle& article);  // writes through a temp file, then renames
 

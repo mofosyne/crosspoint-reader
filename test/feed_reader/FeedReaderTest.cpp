@@ -15,6 +15,7 @@
 #include "LinkExtractor.h"
 #include "SeenSet.h"
 #include "SourcesFile.h"
+#include "Weather.h"
 
 using namespace feed;
 
@@ -638,4 +639,36 @@ TEST(ContentExtract, TrimsBareImagePlaceholdersAtTheEnd) {
   EXPECT_EQ(trimTrailingImages("Text.\nsee [image]"), 17u);       // part of a line
   EXPECT_EQ(trimTrailingImages("Text.\n[image]\nMore text.\n"), 25u);
   EXPECT_EQ(trimTrailingImages("[image]"), 0u);
+}
+
+TEST(Weather, ParsesTheOpenMeteoAnswer) {
+  const char* json =
+      R"({"latitude":-37.78,"current":{"time":"2026-11-08T20:00","interval":900,"temperature_2m":13.5,"weather_code":1},)"
+      R"("daily":{"time":["2026-11-08","2026-11-09"],"weather_code":[3,51],"temperature_2m_max":[15.7,21.6],)"
+      R"("temperature_2m_min":[8.5,5.9],"precipitation_probability_max":[2,null]}})";
+  feed::Weather w;
+  ASSERT_TRUE(feed::parseOpenMeteo(json, w));
+  EXPECT_TRUE(w.hasNow);
+  EXPECT_EQ(w.nowC, 14);
+  EXPECT_EQ(w.nowCode, 1);
+  EXPECT_EQ(w.nowTime, "2026-11-08T20:00");
+  ASSERT_EQ(w.days.size(), 2u);
+  EXPECT_EQ(w.days[0].date, "2026-11-08");
+  EXPECT_EQ(w.days[0].maxC, 16);
+  EXPECT_EQ(w.days[0].minC, 9);
+  EXPECT_EQ(w.days[1].code, 51);
+  EXPECT_EQ(w.days[1].rainPercent, 0);
+}
+
+TEST(Weather, RejectsAnswersWithoutAForecast) {
+  feed::Weather w;
+  EXPECT_FALSE(feed::parseOpenMeteo("{\"error\":true,\"reason\":\"x\"}", w));
+  EXPECT_FALSE(feed::parseOpenMeteo("<html>blocked</html>", w));
+}
+
+TEST(Weather, NamesTheWeekday) {
+  EXPECT_EQ(feed::weekdayName("2026-11-08"), "Sun");
+  EXPECT_EQ(feed::weekdayName("2024-02-29"), "Thu");
+  EXPECT_EQ(feed::weekdayName("garbage"), "");
+  EXPECT_STREQ(feed::weatherText(61), "Light rain");
 }
