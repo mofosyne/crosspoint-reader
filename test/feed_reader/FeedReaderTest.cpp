@@ -583,3 +583,59 @@ TEST(CommentFeed, StopsAtTheLimit) {
   EXPECT_FALSE(renderer.add(c));
   EXPECT_EQ(renderer.count(), 2u);
 }
+
+// ---- extraction of plain pages -------------------------------------------------------------------------
+
+TEST(ContentExtract, PicksTheContainerWithTheProse) {
+  const std::string prose(600, 'w');
+  const std::string page =
+      "<html><body><header id=header><ul><li><a href=/a>About</a></li><li><a href=/b>Donate</a></li></ul></header>"
+      "<section id=post-section><h1>Title</h1><p>" +
+      prose + "</p></section><footer><a href=/c>Contact</a></footer></body></html>";
+  const std::string_view main = extractMainContent(page);
+  EXPECT_NE(main.find(prose), std::string_view::npos);
+  EXPECT_EQ(main.find("About"), std::string_view::npos);
+  EXPECT_EQ(main.find("Contact"), std::string_view::npos);
+}
+
+TEST(ContentExtract, KeepsTheWholeBodyWhenNothingDominates) {
+  const std::string a(500, 'a');
+  const std::string b(500, 'b');
+  const std::string page = "<body><div>" + a + "</div><div>" + b + "</div></body>";
+  const std::string_view main = extractMainContent(page);
+  EXPECT_NE(main.find(a), std::string_view::npos);
+  EXPECT_NE(main.find(b), std::string_view::npos);
+}
+
+TEST(ContentExtract, DescendsThroughWrappers) {
+  const std::string prose(700, 'p');
+  const std::string page = "<body><div id=wrap><nav><a href=/x>Home</a></nav><div class=c><div class=d><p>" + prose +
+                           "</p></div></div></div></body>";
+  const std::string_view main = extractMainContent(page);
+  EXPECT_EQ(main.find("Home"), std::string_view::npos);
+  EXPECT_NE(main.find(prose), std::string_view::npos);
+}
+
+TEST(ContentExtract, DropsTheHeadingThatRepeatsTheTitle) {
+  const std::string_view page =
+      "<header><h1 class=\"t\">The Hidden Microcontroller Inside A LoRa Chip</h1><p>by Jo</p></header><p>text</p>";
+  EXPECT_EQ(dropLeadingTitle(page, "The Hidden Microcontroller Inside a LoRa chip"),
+            "<p>by Jo</p></header><p>text</p>");
+  const std::string_view quoted = "<h1>It&#8217;s Alpine Linux &amp; Kindles</h1><p>x</p>";
+  EXPECT_EQ(dropLeadingTitle(quoted, "It\xE2\x80\x99s Alpine Linux & Kindles"), "<p>x</p>");
+  EXPECT_EQ(dropLeadingTitle(quoted, "Something else entirely"), quoted);
+  EXPECT_EQ(dropLeadingTitle("<p>no heading</p>", "A long enough title"), "<p>no heading</p>");
+  EXPECT_EQ(dropLeadingTitle("<h1>Short</h1>", "Short"), "<h1>Short</h1>");  // too short to trust
+  // A site name often comes first.
+  EXPECT_EQ(
+      dropLeadingTitle("<h1><a href=/>My Blog</a></h1><h2>Libghostty 1.0 is out</h2><p>x</p>", "Libghostty 1.0 is out"),
+      "<p>x</p>");
+}
+
+TEST(ContentExtract, TrimsBareImagePlaceholdersAtTheEnd) {
+  EXPECT_EQ(trimTrailingImages("Text.\n\n[image]\n[image]\n[image]"), 5u);
+  EXPECT_EQ(trimTrailingImages("Text.\n[image: a chart]"), 22u);  // alt text is kept
+  EXPECT_EQ(trimTrailingImages("Text.\nsee [image]"), 17u);       // part of a line
+  EXPECT_EQ(trimTrailingImages("Text.\n[image]\nMore text.\n"), 25u);
+  EXPECT_EQ(trimTrailingImages("[image]"), 0u);
+}

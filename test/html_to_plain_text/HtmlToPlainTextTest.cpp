@@ -236,3 +236,21 @@ TEST(HtmlToPlainText, PageChromeIsDroppedOnRequest) {
 }
 
 }  // namespace
+
+namespace {
+std::string webText(std::string html) {
+  html.push_back('\0');
+  html.pop_back();
+  const size_t n = htmlToPlainTextInPlace(html.data(), html.size(), '#', nullptr, true);
+  return html.substr(0, n);
+}
+}  // namespace
+
+TEST(HtmlToPlainText, WebPagesCollapseWhitespaceLikeHtml) {
+  EXPECT_EQ(webText("<div>\n      <p>\n   one\n   two  three</p>\n\n   <p>  four </p></div>"), "one two three\n\nfour");
+  EXPECT_EQ(webText("<h2>\n  Title</h2><p>x</p>"), "#Title\n\nx");  // no space after the heading marker
+}
+
+TEST(HtmlToPlainText, WebPagesKeepPreformattedText) {
+  EXPECT_EQ(webText("<p>run:</p><pre>a\n  b\n</pre><p>done</p>"), "run:\n\na\n  b\n\ndone");
+}

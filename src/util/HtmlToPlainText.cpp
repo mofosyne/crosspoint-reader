@@ -329,6 +329,7 @@ size_t htmlToPlainTextInPlace(char* buffer, const size_t size, const char headin
   std::string linkHref;  // copied at the opening tag: the text it came from is overwritten later
   size_t linkStart = 0;
   bool linkOpen = false;
+  int preDepth = 0;  // inside <pre>, where web pages keep their line breaks and spacing
 
   for (size_t i = 0; i < html.size();) {
     if (html[i] == '<' && isTagStart(html, i)) {
@@ -340,6 +341,11 @@ size_t htmlToPlainTextInPlace(char* buffer, const size_t size, const char headin
       if (const char* hidden = hiddenElementName(html, i + 1, close)) {
         i = skipPastClosingTag(html, close + 1, hidden);
         continue;
+      }
+      if (isOpeningTag(html, i + 1, close, "pre")) {
+        ++preDepth;
+      } else if (close > i + 1 && html[i + 1] == '/' && isOpeningTag(html, i + 2, close, "pre") && preDepth > 0) {
+        --preDepth;
       }
       if (links && isOpeningTag(html, i + 1, close, "a")) {
         const std::string_view href = attributeValue(html, i + 1, close, "href");
@@ -427,7 +433,13 @@ size_t htmlToPlainTextInPlace(char* buffer, const size_t size, const char headin
     }
 
     const unsigned char c = html[i++];
-    if (c == '\r' || c == '\t') {
+    if (dropPageChrome && preDepth == 0 && (c == '\r' || c == '\t' || c == '\n' || c == ' ')) {
+      // Web pages follow the HTML rule: any run of whitespace is one space, and none starts a line.
+      if (written > 0 && buffer[written - 1] != ' ' && buffer[written - 1] != '\n' &&
+          buffer[written - 1] != headingMarker) {
+        buffer[written++] = ' ';
+      }
+    } else if (c == '\r' || c == '\t') {
       if (written > 0 && buffer[written - 1] != ' ' && buffer[written - 1] != '\n') buffer[written++] = ' ';
     } else if (c == '\n') {
       appendBreak(buffer, written);

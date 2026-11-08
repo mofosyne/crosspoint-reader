@@ -315,7 +315,8 @@ void FeedSync::readPending() {
     ++status_.failed;
     return;
   }
-  const std::string_view main = note.empty() ? feed::extractMainContent(page) : std::string_view(note);
+  const std::string_view main =
+      note.empty() ? feed::dropLeadingTitle(feed::extractMainContent(page), item.title) : std::string_view(note);
   if (saveItem(source, item, main, /*fragment=*/false)) {
     state_.seen.add(item.url);
   } else {
@@ -399,7 +400,6 @@ void FeedSync::appendCommentFeed(const std::string& feedUrl, const Pending& item
 }
 
 bool FeedSync::saveItem(const feed::Source& source, const Pending& item, std::string_view html, bool fragment) {
-  (void)fragment;
   if (html.empty()) return false;
   char* work = reinterpret_cast<char*>(workBuf_.get());
   std::string title = item.title.empty() ? item.url : item.title;
@@ -419,6 +419,11 @@ bool FeedSync::saveItem(const feed::Source& source, const Pending& item, std::st
   Links links(item.url, used);
   const size_t bodyLen = htmlToPlainTextInPlace(work + used, copy, DICTIONARY_PLAIN_HEADWORD_MARKER, &links, true);
   used += bodyLen;
+  if (!fragment) {  // trailing related-post thumbnails are not part of the article
+    const size_t bodyStart = used - bodyLen;
+    used = bodyStart + feed::trimTrailingImages(std::string_view(work + bodyStart, bodyLen));
+    std::erase_if(links.links, [used](const feed::CachedArticle::Link& l) { return l.end > used; });
+  }
 
   // Comments: a second page, taken as text under its own heading.
   if (source.comments == feed::CommentsMode::Link && !item.commentsUrl.empty() && used + 4096 < workCap_ &&
