@@ -98,6 +98,7 @@ add_subdirectory(protected_paths)
 add_subdirectory(zim_reader)
 add_subdirectory(zim_zstd)
 add_subdirectory(feed_reader)
+add_subdirectory(flashcards)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME translation_spacing COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_translation_spacing.py)

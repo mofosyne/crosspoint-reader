@@ -1,18 +1,29 @@
 # CrossPoint Reader (mofosyne fork)
 
-> **This is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader).**
-> It is not upstream and is unlikely to be upstreamed (`SCOPE.md` rejects RSS readers). Everything below this
-> banner is upstream's documentation. Additions in this fork, mainly for the Seeed reTerminal Sticky (ESP32-S3, PSRAM):
+> ## This is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)
 >
-> - **ZIM reader**: browse and read offline archives such as Wikipedia from the SD card (`CROSSPOINT_ZIM`).
-> - **Feed reader**: RSS, Atom, sitemap and index-page sources, manual sync, Hacker News and WordPress comments,
->   cached articles in the same viewer (`CROSSPOINT_FEEDS`). Sources live in `/feeds/sources.txt`.
-> - **Dashboard**: date, Open-Meteo forecast and unread headlines, set up in `/feeds/dashboard.txt`.
-> - **Web editor** for both files at `/feeds` while File Transfer is running.
+> Maintained by [@mofosyne](https://github.com/mofosyne), mainly for the Seeed reTerminal Sticky (ESP32-S3 with
+> 8 MB PSRAM). Everything below this banner is upstream's work and documentation. `main` is this fork and `develop`
+> mirrors upstream.
+>
+> **Why it is a fork:** CrossPoint's [`SCOPE.md`](SCOPE.md) rules out RSS readers, news aggregators and background
+> Wi-Fi, and keeps the X3/X4 (ESP32-C3, about 380 KB RAM, no PSRAM) as the resource baseline. The additions below
+> go against the first and need the PSRAM of the second, so they are not expected to be upstreamed.
+>
+> **Added on top of upstream** (build flags `CROSSPOINT_FEEDS`, `CROSSPOINT_ZIM`, in the Sticky build):
+>
+> - **Feed reader**: RSS, Atom, sitemap and index-page sources with manual sync, Hacker News and WordPress
+>   comments, and cached articles that open in the same viewer. Sources live in `/feeds/sources.txt`.
+>   *(Rejected by `SCOPE.md`.)*
+> - **Dashboard**: date, Open-Meteo forecast and unread headlines, configured in `/feeds/dashboard.txt`.
+> - **ZIM reader**: browse and read offline archives such as Wikipedia from the SD card. *(Needs PSRAM.)*
+> - **Web editor** for the feed files at `/feeds` while File Transfer runs.
 > - **Sleep resume**: ZIM and feed articles stay on screen while asleep and reopen on wake.
-> - Debug console commands for driving a Sticky over serial (`CROSSPOINT_SERIAL_INPUT`).
+> - Serial debug console for driving a Sticky from a PC (`CROSSPOINT_SERIAL_INPUT`).
 >
-> Branches: `main` is this fork; `develop` mirrors upstream.
+> **Planned:** Anki-style flashcards for Japanese and Chinese, based on
+> [Hector68's fork](https://github.com/Hector68/crosspoint-reader), with dictionary lookup, word discovery by level
+> and web upload.
 
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
