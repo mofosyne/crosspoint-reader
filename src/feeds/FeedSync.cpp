@@ -85,7 +85,8 @@ bool FeedSync::begin(std::string& error) {
     loadState(source.id, state);
     if (checkAll_ || feed::isDue(source, state.lastCheck, now_)) due_.push_back(std::move(source));
   }
-  if (due_.empty()) {
+  // With nothing due the run still refreshes the dashboard's weather, when that is on.
+  if (due_.empty() && !(loadDashboardConfig().weather && !parsed.sources.empty())) {
     error = parsed.sources.empty() ? "The sources file has no usable lines" : "Nothing is due yet";
     if (!parsed.errors.empty()) error += " (" + parsed.errors[0] + ")";
     return false;

@@ -19,6 +19,10 @@ class DashboardActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Draws the dashboard as the panel's sleep screen (no button hints), from what the last sync stored.
+  // True when sleeping now should leave the dashboard: the setting is on and no book or article is open.
+  static bool wantedOnSleep();
+  static void drawSleepScreen(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
  private:
   struct SourceLine {
@@ -26,7 +30,9 @@ class DashboardActivity final : public Activity {
     size_t unread = 0;
   };
 
-  void reload();
+  void load();    // reads the stored data; the caller holds the render lock if one is needed
+  void reload();  // load() under the render lock
+  void drawPage(bool withHints);
 
   feed::DashboardConfig config_;
   feed::Weather weather_;

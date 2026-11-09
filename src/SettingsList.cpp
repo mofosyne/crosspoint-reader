@@ -214,6 +214,12 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
 #if CROSSPOINT_FEEDS
   emit(SettingInfo::Toggle(StrId::STR_FEED_PRELOAD_PAGES, &CrossPointSettings::feedPreloadPages, "feedPreloadPages",
                            StrId::STR_CAT_SYSTEM));
+  emit(SettingInfo::Toggle(StrId::STR_DASHBOARD_ON_SLEEP, &CrossPointSettings::dashboardOnSleep, "dashboardOnSleep",
+                           StrId::STR_CAT_SYSTEM));
+  emit(SettingInfo::Toggle(StrId::STR_DAILY_FEED_SYNC, &CrossPointSettings::dailySync, "dailySync",
+                           StrId::STR_CAT_SYSTEM));
+  emit(SettingInfo::Value(StrId::STR_DAILY_SYNC_HOUR, &CrossPointSettings::dailySyncHour, {0, 23, 1}, "dailySyncHour",
+                          StrId::STR_CAT_SYSTEM));
 #endif
 
   // OPDS download folder: persisted + web-exposed, but category-less so it

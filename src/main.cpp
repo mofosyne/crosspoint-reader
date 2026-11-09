@@ -46,6 +46,8 @@
 #include "activities/zim/ZimBrowseActivity.h"
 #endif
 #if CROSSPOINT_FEEDS
+#include "activities/feeds/DashboardActivity.h"
+#include "activities/feeds/FeedSyncActivity.h"
 #include "activities/feeds/FeedsActivity.h"
 #include "feeds/FeedArticleView.h"
 #include "feeds/FeedStore.h"
@@ -478,6 +480,35 @@ static bool holdSleepWhileUsbPowered() {
 }
 #endif
 
+static volatile bool sleepRequested = false;
+static bool scheduledWake = false;     // this boot came from the daily sync timer
+static uint32_t debugWakeSeconds = 0;  // SLEEPTIMER: debug override of the next wake delay
+void requestDeepSleep() { sleepRequested = true; }
+
+#if CROSSPOINT_FEEDS
+// Seconds until the next daily sync time (local), or 0 when the sync is off, the clock was never set or
+// the battery is too low to be worth waking for.
+static uint32_t secondsToDailySync() {
+  if (debugWakeSeconds != 0) return debugWakeSeconds;
+  if (!SETTINGS.dailySync || powerManager.getBatteryPercentage() < 20) return 0;
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return 0;
+  struct tm when;
+  localtime_r(&now, &when);
+  when.tm_hour = SETTINGS.dailySyncHour;
+  when.tm_min = 0;
+  when.tm_sec = 0;
+  when.tm_isdst = -1;
+  time_t at = mktime(&when);
+  if (at <= now + 120) {  // today's time has passed: tomorrow's
+    when.tm_mday += 1;
+    when.tm_isdst = -1;
+    at = mktime(&when);
+  }
+  return at > now ? static_cast<uint32_t>(at - now) : 0;
+}
+#endif
+
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
@@ -499,10 +530,16 @@ void enterDeepSleep(bool fromTimeout = false) {
   if (!bluetoothStopped) LOG_ERR("SLP", "Bluetooth did not stop; deferring sleep-event delivery");
   deliverSleepPluginEvents(bluetoothStopped);
 
+#if CROSSPOINT_FEEDS
+  const bool dashboardSleep = DashboardActivity::wantedOnSleep();  // it replaces Quick Resume's frame
+#else
+  const bool dashboardSleep = false;
+#endif
   const bool isQuickResumeSleep =
-      viewerOpen || SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
-      (fromTimeout &&
-       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+      !dashboardSleep &&
+      (viewerOpen || SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
+       (fromTimeout &&
+        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT));
   // Every sleep mode leaves a complete retained frame on the e-ink panel. Keep
   // it visible until the first useful reader or home paint replaces it.
   APP_STATE.showBootScreen = false;
@@ -538,6 +575,13 @@ void enterDeepSleep(bool fromTimeout = false) {
   display.deepSleep();
   Storage.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
+
+#if CROSSPOINT_FEEDS
+  if (const uint32_t wakeIn = secondsToDailySync()) {
+    LOG_INF("MAIN", "Daily sync wake in %lu s", static_cast<unsigned long>(wakeIn));
+    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(wakeIn) * 1000000ULL);
+  }
+#endif
 
   powerManager.startDeepSleep(gpio, wakeOnHeldButton);
 }
@@ -668,7 +712,8 @@ void setup() {
 #endif
 
   APP_STATE.loadFromFile();
-  const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
+  scheduledWake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+  const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton || scheduledWake;
   const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
 
   if (recoveryFirmwareMode) {
@@ -828,6 +873,11 @@ void setup() {
   } else if (rebootedFromPanic) {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
+#if CROSSPOINT_FEEDS
+  } else if (scheduledWake) {
+    activityManager.replaceActivity(std::make_unique<FeedSyncActivity>(renderer, mappedInputManager,
+                                                                       /*checkAll=*/false, /*scheduled=*/true));
+#endif
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
@@ -934,6 +984,11 @@ static void sendDebugText(const char* tag, const std::string& text) {
 #endif
 
 static void handleCommand(const String& cmd) {
+  if (cmd.startsWith("SLEEPTIMER:")) {  // sleep, and wake by the timer after N seconds (tests the daily sync)
+    debugWakeSeconds = static_cast<uint32_t>(cmd.substring(11).toInt());
+    enterDeepSleep(false);
+    return;
+  }
   if (cmd == "SLEEP") {  // go to deep sleep as the idle timeout would
     enterDeepSleep(false);
     return;
@@ -1182,6 +1237,12 @@ void loop() {
     lastX4ProPowerClickAt = 0;
     enterDeepSleep();
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
+    return;
+  }
+
+  // A scheduled sync that finished, or hung, goes back to sleep.
+  if (sleepRequested || (scheduledWake && millis() > 12UL * 60 * 1000)) {
+    enterDeepSleep(true);
     return;
   }
 

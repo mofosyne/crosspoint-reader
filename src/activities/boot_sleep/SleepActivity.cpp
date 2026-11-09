@@ -27,6 +27,9 @@
 #include "CrossPointState.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
+#if CROSSPOINT_FEEDS
+#include "activities/feeds/DashboardActivity.h"
+#endif
 #include "fontIds.h"
 #include "images/Logo120.h"
 #include "images/MoonIcon.h"
@@ -690,6 +693,16 @@ void SleepActivity::onEnter() {
       APP_STATE.resumeKind != 0 || SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+
+#if CROSSPOINT_FEEDS
+  // Sleeping from a menu: leave the dashboard on the panel (a book or article keeps its own page).
+  if (DashboardActivity::wantedOnSleep()) {
+    display.setInverted(false);
+    DashboardActivity::drawSleepScreen(renderer, mappedInput);
+    renderer.displayBuffer(kSleepClean);
+    return;
+  }
+#endif
 
   if (renderQuickResume) {
     // Quick Resume keeps the current frame as-is, so the driver's inversion

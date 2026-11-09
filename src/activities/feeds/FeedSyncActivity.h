@@ -11,7 +11,8 @@
 // heap back.
 class FeedSyncActivity final : public Activity {
  public:
-  FeedSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool checkAll);
+  // `scheduled`: started by the daily timer wake. It draws little, and sleeps the device when it ends.
+  FeedSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool checkAll, bool scheduled = false);
 
   void onEnter() override;
   void onExit() override;
@@ -28,6 +29,7 @@ class FeedSyncActivity final : public Activity {
   bool wifiUp() const;
 
   const bool checkAll_;
+  const bool scheduled_;
   State state_ = State::Connecting;
   std::string error_;
   std::unique_ptr<feeds::FeedSync> sync_;

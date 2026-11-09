@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -9,12 +10,18 @@
 
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "SleepRequest.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-FeedSyncActivity::FeedSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool checkAll)
-    : Activity("FeedSync", renderer, mappedInput), checkAll_(checkAll) {}
+namespace {
+constexpr int MIN_SCHEDULED_BATTERY_PERCENT = 20;
+}
+
+FeedSyncActivity::FeedSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool checkAll,
+                                   bool scheduled)
+    : Activity("FeedSync", renderer, mappedInput), checkAll_(checkAll), scheduled_(scheduled) {}
 
 bool FeedSyncActivity::wifiUp() const {
   return WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
@@ -22,6 +29,11 @@ bool FeedSyncActivity::wifiUp() const {
 
 void FeedSyncActivity::onEnter() {
   Activity::onEnter();
+  if (scheduled_ && powerManager.getBatteryPercentage() < MIN_SCHEDULED_BATTERY_PERCENT) {
+    state_ = State::Error;  // a flat battery is not worth a sync; loop() puts the device back to sleep
+    error_ = "Battery low";
+    return;
+  }
   if (wifiUp()) {
     startSync();
     return;
@@ -49,6 +61,7 @@ void FeedSyncActivity::startSync() {
   if (!sync_ || !sync_->begin(error_)) {
     state_ = State::Error;
     if (error_.empty()) error_ = "Not enough memory";
+    LOG_ERR("FEED", "Sync did not start: %s", error_.c_str());
   } else {
     state_ = State::Running;
   }
@@ -66,6 +79,10 @@ void FeedSyncActivity::onExit() {
 }
 
 void FeedSyncActivity::loop() {
+  if (scheduled_ && (state_ == State::Done || state_ == State::Error)) {
+    requestDeepSleep();
+    return;
+  }
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (state_ == State::Running && sync_) sync_->cancel();
     finish();
@@ -78,7 +95,7 @@ void FeedSyncActivity::loop() {
     shown_ = sync_->status();
   }
   if (!more) state_ = State::Done;
-  requestUpdate();
+  if (!scheduled_ || state_ != State::Running) requestUpdate();  // a timed sync does not repaint every step
 }
 
 void FeedSyncActivity::render(RenderLock&&) {

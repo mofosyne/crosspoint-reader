@@ -26,7 +26,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #if CROSSPOINT_FEEDS
-#include "activities/feeds/FeedsActivity.h"
+#include "activities/feeds/ExtrasActivity.h"
 #endif
 
 int HomeActivity::getMenuItemCount() const {
@@ -538,7 +538,7 @@ void HomeActivity::render(RenderLock&&) {
   std::vector<UIIcon> menuIcons = {Folder, Library, Transfer, Settings};
 
 #if CROSSPOINT_FEEDS
-  menuItems.insert(menuItems.end() - 1, tr(STR_FEEDS));  // before Settings
+  menuItems.insert(menuItems.end() - 1, tr(STR_EXTRAS));  // before Settings
   menuIcons.insert(menuIcons.end() - 1, Wifi);
 #endif
 
@@ -591,7 +591,7 @@ void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onFeedsOpen() {
 #if CROSSPOINT_FEEDS
-  auto feedsScreen = makeUniqueNoThrow<FeedsActivity>(renderer, mappedInput);
+  auto feedsScreen = makeUniqueNoThrow<ExtrasActivity>(renderer, mappedInput);
   if (feedsScreen) startActivityForResult(std::move(feedsScreen), [](const ActivityResult&) {});
 #endif
 }

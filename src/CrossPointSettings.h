@@ -364,6 +364,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t focusReadingEnabled = 0;
   // Feeds: also fetch each article page during sync (0 = keep to the text the feed carries)
   uint8_t feedPreloadPages = 0;
+  // Feeds: sleeping from a menu (not a book or article) leaves the dashboard on the panel
+  uint8_t dashboardOnSleep = 0;
+  // Feeds: wake once a day at dailySyncHour (local time), sync, and go back to sleep
+  uint8_t dailySync = 0;
+  uint8_t dailySyncHour = 5;
   uint8_t readerMenuStyle = READER_MENU_LIST;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";

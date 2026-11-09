@@ -6,6 +6,8 @@
 
 #include <ctime>
 
+#include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "FeedSyncActivity.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
@@ -27,6 +29,10 @@ void DashboardActivity::onEnter() {
 
 void DashboardActivity::reload() {
   RenderLock lock(*this);
+  load();
+}
+
+void DashboardActivity::load() {
   config_ = feeds::loadDashboardConfig();
   weather_ = feed::Weather{};
   weatherFetched_ = 0;
@@ -62,6 +68,21 @@ void DashboardActivity::loop() {
 }
 
 void DashboardActivity::render(RenderLock&&) {
+  drawPage(true);
+  renderer.displayBuffer();
+}
+
+bool DashboardActivity::wantedOnSleep() {
+  return SETTINGS.dashboardOnSleep && APP_STATE.resumeKind == 0 && !APP_STATE.lastSleepFromReader;
+}
+
+void DashboardActivity::drawSleepScreen(GfxRenderer& renderer, MappedInputManager& mappedInput) {
+  DashboardActivity page(renderer, mappedInput);
+  page.load();
+  page.drawPage(false);
+}
+
+void DashboardActivity::drawPage(const bool withHints) {
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
@@ -155,7 +176,8 @@ void DashboardActivity::render(RenderLock&&) {
     y += smallHeight;
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Sync", "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  renderer.displayBuffer();
+  if (withHints) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Sync", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 }
