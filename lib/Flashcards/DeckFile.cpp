@@ -96,6 +96,10 @@ std::string plainField(std::string_view in) {
       } else {
         i += 1 + used;
       }
+    } else if (c == '\xE2' && i + 2 < in.size() && in[i + 1] == '\x80' &&
+               (in[i + 2] == '\xA8' || in[i + 2] == '\xA9')) {
+      out += '\n';  // U+2028 and U+2029 separate senses in some dictionaries; fonts do not draw them
+      i += 3;
     } else if (c == '\\' && i + 1 < in.size() && in[i + 1] == 'n') {
       out += '\n';
       i += 2;

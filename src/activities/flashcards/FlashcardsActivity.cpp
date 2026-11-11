@@ -4,6 +4,7 @@
 
 #include "FlashcardAddActivity.h"
 #include "FlashcardReviewActivity.h"
+#include "WordListsActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 
@@ -25,6 +26,8 @@ void FlashcardsActivity::reload() {
   rows_.clear();
   labels_.push_back("Add a word");
   values_.push_back("from the dictionary");
+  labels_.push_back("Discover words");
+  values_.push_back("JLPT, HSK and other lists");
   for (const auto& ref : decks_) {
     flashcards::Deck deck;
     std::string value = "cannot open";
@@ -71,7 +74,8 @@ void FlashcardsActivity::buildScreen(UiScreen& screen) {
 }
 
 void FlashcardsActivity::startAddWord() {
-  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, "Word to look up", "", 60, InputType::Text);
+  auto keyboard =
+      makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, "Word to look up", "", 60, InputType::Text);
   if (!keyboard) return;
   startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
     if (result.isCancelled) return;
@@ -92,7 +96,16 @@ void FlashcardsActivity::activateIndex(const int index) {
     startAddWord();
     return;
   }
-  const size_t deck = static_cast<size_t>(index) - 1;
+  if (index == 1) {
+    if (auto lists = makeUniqueNoThrow<WordListsActivity>(renderer, mappedInput)) {
+      startActivityForResult(std::move(lists), [this](const ActivityResult&) {
+        reload();
+        requestUpdate();
+      });
+    }
+    return;
+  }
+  const size_t deck = static_cast<size_t>(index) - 2;
   if (deck >= decks_.size()) return;
   if (auto review = makeUniqueNoThrow<FlashcardReviewActivity>(renderer, mappedInput, decks_[deck])) {
     startActivityForResult(std::move(review), [this](const ActivityResult&) {

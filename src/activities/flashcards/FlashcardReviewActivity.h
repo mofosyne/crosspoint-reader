@@ -1,9 +1,12 @@
 #pragma once
 
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "activities/Activity.h"
 #include "flashcards/DeckStore.h"
+#include "util/Dictionary.h"
 
 // One study session over a deck: the cards that are due, then a few new ones. Tap or Confirm shows the
 // answer; then grade it with the four buttons on screen (touch) or with the keys: Left = Again, Down = Hard,
@@ -24,6 +27,7 @@ class FlashcardReviewActivity final : public Activity {
   void showNext();
   void answer(flashcards::Grade grade);
   void flip();
+  void lookupFront();
   int buttonAt(int x, int y) const;
   static std::string intervalText(int days);
 
@@ -38,4 +42,6 @@ class FlashcardReviewActivity final : public Activity {
   bool flipped_ = false;
   bool finished_ = false;
   int sinceSave_ = 0;
+  std::unique_ptr<Dictionary> dict_;  // opened the first time a card is looked up
+  std::string notice_;                // a short message above the buttons
 };

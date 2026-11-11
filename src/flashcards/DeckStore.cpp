@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 
@@ -19,6 +20,61 @@ std::string cardsPath(const std::string& folder) { return folder + "/cards.tsv";
 std::string progressPath(const std::string& folder) { return folder + "/progress.txt"; }
 
 }  // namespace
+
+std::vector<std::string> listWordLists() {
+  std::vector<std::string> names;
+  HalFile root = Storage.open(WORDLISTS_ROOT);
+  if (!root || !root.isDirectory()) return names;
+  char name[96];
+  for (HalFile f = root.openNextFile(); f; f = root.openNextFile()) {
+    if (f.isDirectory()) continue;
+    f.getName(name, sizeof(name));
+    const std::string file = name;
+    if (file.size() > 4 && file.compare(file.size() - 4, 4, ".tsv") == 0 && file[0] != '.') {
+      names.push_back(file.substr(0, file.size() - 4));
+    }
+    if (names.size() >= 40) break;
+  }
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
+static std::string knownPath(const std::string& list) { return std::string(WORDLISTS_ROOT) + "/" + list + ".known"; }
+
+std::vector<uint32_t> loadKnownWords(const std::string& listName) {
+  std::vector<uint32_t> keys;
+  std::string text;
+  if (!Storage.readFileToString(TAG, knownPath(listName), 512 * 1024, text)) return keys;
+  for (size_t pos = 0; pos < text.size();) {
+    keys.push_back(static_cast<uint32_t>(strtoul(text.c_str() + pos, nullptr, 16)));
+    const size_t nl = text.find('\n', pos);
+    if (nl == std::string::npos) break;
+    pos = nl + 1;
+  }
+  return keys;
+}
+
+bool addKnownWord(const std::string& listName, uint32_t key) {
+  HalFile f = Storage.open(knownPath(listName).c_str(), O_WRONLY | O_CREAT | O_APPEND);
+  if (!f) return false;
+  char line[16];
+  const int n = snprintf(line, sizeof(line), "%08x\n", static_cast<unsigned>(key));
+  const bool ok = f.write(line, static_cast<size_t>(n)) == static_cast<size_t>(n);
+  f.close();
+  return ok;
+}
+
+std::vector<uint32_t> ownedWords(const std::string& listName) {
+  std::vector<uint32_t> keys = loadKnownWords(listName);
+  for (const auto& ref : listDecks()) {
+    Deck deck;
+    if (!deck.open(ref)) continue;
+    for (size_t i = 0; i < deck.size(); ++i) keys.push_back(deck.state(i).key);
+  }
+  std::sort(keys.begin(), keys.end());
+  keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+  return keys;
+}
 
 std::vector<DeckRef> listDecks() {
   std::vector<DeckRef> decks;
@@ -72,12 +128,23 @@ int32_t today(uint32_t visitCounter) {
 
 bool Deck::open(const DeckRef& ref) {
   ref_ = ref;
+  if (!openFile(cardsPath(ref.folder))) return false;
+  std::string progress;
+  if (Storage.readFileToString(TAG, progressPath(ref.folder), 4 * 1024 * 1024, progress)) {
+    applyProgress(progress, states(), lineStart_.size());
+    unsigned visits = 0;
+    if (progress.rfind("visits ", 0) == 0 && sscanf(progress.c_str(), "visits %u", &visits) == 1) visits_ = visits;
+  }
+  return true;
+}
+
+bool Deck::openFile(const std::string& path) {
   lineStart_.clear();
   changed_ = false;
   truncated_ = false;
   visits_ = 0;
   HalFile f;
-  if (!Storage.openFileForRead(TAG, cardsPath(ref.folder), f)) return false;
+  if (!Storage.openFileForRead(TAG, path, f)) return false;
   size_t size = f.fileSize();
   if (size > MAX_BYTES) {
     size = MAX_BYTES;
@@ -117,14 +184,6 @@ bool Deck::open(const DeckRef& ref) {
   for (size_t i = 0; i < keys.size(); ++i) {
     new (&states()[i]) CardState();
     states()[i].key = keys[i];
-  }
-  std::string progress;
-  if (Storage.readFileToString(TAG, progressPath(ref.folder), 4 * 1024 * 1024, progress)) {
-    applyProgress(progress, states(), keys.size());
-    unsigned visits = 0;
-    if (const size_t at = progress.find("visits "); at == 0 && sscanf(progress.c_str(), "visits %u", &visits) == 1) {
-      visits_ = visits;
-    }
   }
   return true;
 }

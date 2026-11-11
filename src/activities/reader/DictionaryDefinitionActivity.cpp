@@ -17,6 +17,10 @@
 
 #include "CrossPointSettings.h"
 #include "HapticFeedback.h"
+#if CROSSPOINT_FEEDS
+#include "flashcards/CardFromDictionary.h"
+#include "flashcards/DeckStore.h"
+#endif
 #include "ReaderUtils.h"
 #include "components/HeaderBackTapTarget.h"
 #include "components/UITheme.h"
@@ -590,6 +594,18 @@ void DictionaryDefinitionActivity::startSelection(const int x, const int y) {
   });
 }
 
+#if CROSSPOINT_FEEDS
+// Adds the word on screen to the flashcards (the default deck), with the definition as its meaning.
+void DictionaryDefinitionActivity::addFlashcard() {
+  haptic_feedback::touchAction();
+  const flashcards::Card card = flashcards::cardFromDefinition(content.headword, content.text, htmlDefinition);
+  showMessage(!card.back.empty() && flashcards::appendCard(flashcards::DEFAULT_DECK, card)
+                  ? StrId::STR_CARD_ADDED
+                  : StrId::STR_CARD_ADD_FAILED);
+  requestUpdate();
+}
+#endif
+
 void DictionaryDefinitionActivity::loop() {
   if (initialLayoutFailed) {
     if (millis() - messageTime >= MESSAGE_DURATION_MS) finish();
@@ -639,6 +655,12 @@ void DictionaryDefinitionActivity::loop() {
   int tx = 0;
   int ty = 0;
   if (mappedInput.wasScreenTapped(tx, ty)) {
+#if CROSSPOINT_FEEDS
+    if (ty < UITheme::getInstance().getMetrics().topPadding + UITheme::getInstance().getMetrics().headerHeight) {
+      addFlashcard();  // a tap on the headword's title bar
+      return;
+    }
+#endif
     if (tx < renderer.getScreenWidth() / 3) {
       if (currentPage > 0) {
         haptic_feedback::touchAction();
@@ -716,10 +738,19 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   const int contentWidth = renderer.getScreenWidth() - hintGutterWidth;
   const int contentY = isInverted ? metrics.buttonHintsHeight : 0;
 
-  char counter[16] = {};
+  char counter[32] = {};
+#if CROSSPOINT_FEEDS
+  // The title bar adds the word to the flashcards when tapped; say so next to the page count.
+  if (totalPages > 1) {
+    snprintf(counter, sizeof(counter), "+card  %d/%d", currentPage + 1, totalPages);
+  } else {
+    snprintf(counter, sizeof(counter), "+card");
+  }
+#else
   if (totalPages > 1) {
     snprintf(counter, sizeof(counter), "%d/%d", currentPage + 1, totalPages);
   }
+#endif
   GUI.drawHeader(renderer, Rect{contentX, contentY + metrics.topPadding, contentWidth, metrics.headerHeight},
                  content.headword.c_str(), counter[0] ? counter : nullptr);
 

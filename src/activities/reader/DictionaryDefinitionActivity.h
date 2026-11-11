@@ -53,6 +53,9 @@ class DictionaryDefinitionActivity final : public Activity {
   };
 
   BodyArea bodyArea() const;
+#if CROSSPOINT_FEEDS
+  void addFlashcard();
+#endif
 
   struct Definition {
     std::string headword;

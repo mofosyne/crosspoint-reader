@@ -9,6 +9,8 @@
 #include "CrossPointSettings.h"
 #include "HapticFeedback.h"
 #include "MappedInputManager.h"
+#include "WrapText.h"
+#include "activities/reader/DictionaryDefinitionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -48,6 +50,7 @@ void FlashcardReviewActivity::startSession() {
 }
 
 void FlashcardReviewActivity::showNext() {
+  notice_.clear();
   ++queuePos_;
   flipped_ = false;
   if (queuePos_ >= queue_.size()) {
@@ -56,6 +59,34 @@ void FlashcardReviewActivity::showNext() {
     return;
   }
   deck_.card(queue_[queuePos_], card_);
+}
+
+// Opens the full dictionary entry for the word on screen, in the dictionary chosen in Settings.
+void FlashcardReviewActivity::lookupFront() {
+  notice_.clear();
+  if (SETTINGS.dictionaryName[0] == '\0') {
+    notice_ = "No dictionary is selected in Settings.";
+  } else {
+    if (!dict_) {
+      dict_ = makeUniqueNoThrow<Dictionary>();
+      if (dict_ && !dict_->open(SETTINGS.dictionaryName)) dict_.reset();
+    }
+    std::string definition, headword;
+    Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
+    if (!dict_ || (dict_->needsIndex() && !dict_->buildIndex([](void*) { vTaskDelay(1); }, nullptr))) {
+      notice_ = "The dictionary could not be opened.";
+    } else if (!dict_->lookup(card_.front.c_str(), definition, headword, &result)) {
+      notice_ = result == Dictionary::LookupResult::NotFound ? "Not in the dictionary." : "The lookup failed.";
+    } else if (auto entry = makeUniqueNoThrow<DictionaryDefinitionActivity>(
+                   renderer, mappedInput, std::move(headword), std::move(definition), dict_->definitionsAreHtml());
+               entry && entry->enableLookup(*dict_, std::string(card_.front))) {
+      startActivityForResult(std::move(entry), [this](const ActivityResult&) { requestUpdate(); });
+      return;
+    } else {
+      notice_ = "Not enough memory to show the entry.";
+    }
+  }
+  requestUpdate();
 }
 
 void FlashcardReviewActivity::flip() {
@@ -102,7 +133,8 @@ void FlashcardReviewActivity::loop() {
     } else if (const int b = buttonAt(tx, ty); b >= 0) {
       answer(static_cast<Grade>(b));
     } else {
-      return;  // a tap elsewhere on the answer does nothing
+      lookupFront();  // a tap on the answer opens the dictionary entry
+      return;
     }
     requestUpdate();
     return;
@@ -117,7 +149,9 @@ void FlashcardReviewActivity::loop() {
     return;
   }
   if (flipped_) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left))
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up))
+      lookupFront();
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Left))
       answer(Grade::Again);
     else if (mappedInput.wasReleased(MappedInputManager::Button::Down))
       answer(Grade::Hard);
@@ -157,7 +191,7 @@ void FlashcardReviewActivity::render(RenderLock&&) {
   const auto centeredLines = [&](const std::string& text, EpdFontFamily::Style style, int maxLines) {
     if (text.empty()) return;
     if (renderer.isSdCardFont(fontId)) renderer.ensureSdCardFontReady(fontId, text.c_str(), 0x03);
-    for (const auto& line : renderer.wrappedText(fontId, text.c_str(), textWidth, maxLines, style)) {
+    for (const auto& line : wrapLines(renderer, fontId, text, textWidth, maxLines, style)) {
       const int w = renderer.getTextWidth(fontId, line.c_str(), style);
       renderer.drawText(fontId, (width - w) / 2, y, line.c_str(), true, style);
       y += lineHeight + 2;
@@ -188,7 +222,10 @@ void FlashcardReviewActivity::render(RenderLock&&) {
       y += lineHeight / 2;
       renderer.drawLine(x, y, width - x, y);
       y += lineHeight / 2;
-      centeredLines(card_.back, EpdFontFamily::REGULAR, 10);
+      // leave room for the context line, the hint and the buttons below
+      const int room =
+          height - metrics.buttonHintsHeight - BUTTON_HEIGHT - 8 - renderer.getLineHeight(UI_10_FONT_ID) * 3 - 24;
+      centeredLines(card_.back, EpdFontFamily::REGULAR, std::max(1, (room - y) / (lineHeight + 2)));
       if (!card_.context.empty()) {
         y += lineHeight / 2;
         renderer.drawText(UI_10_FONT_ID, x, y,
@@ -201,6 +238,10 @@ void FlashcardReviewActivity::render(RenderLock&&) {
   const int bottom = height - metrics.buttonHintsHeight;
   if (loaded_ && !finished_ && flipped_) {
     const int top = bottom - BUTTON_HEIGHT - 8;
+    const std::string hint = notice_.empty() ? "Tap the card for the dictionary" : notice_;
+    const int hw = renderer.getTextWidth(UI_10_FONT_ID, hint.c_str());
+    renderer.drawText(UI_10_FONT_ID, std::max(x, (width - hw) / 2), top - renderer.getLineHeight(UI_10_FONT_ID) - 8,
+                      hint.c_str(), true);
     const int cell = width / 4;
     const flashcards::CardState& state = deck_.state(queue_[queuePos_]);
     for (int i = 0; i < 4; ++i) {

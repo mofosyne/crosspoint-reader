@@ -124,3 +124,5 @@ TEST(Scheduler, ProgressRoundTripsByKey) {
   EXPECT_EQ(b[0].interval, 3);
   EXPECT_FALSE(b[1].seen);
 }
+
+TEST(DeckFile, LineSeparatorsBecomeLineBreaks) { EXPECT_EQ(plainField("one\xE2\x80\xA8two"), "one\ntwo"); }

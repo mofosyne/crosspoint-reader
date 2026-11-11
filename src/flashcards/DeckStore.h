@@ -14,7 +14,8 @@
 namespace flashcards {
 
 constexpr const char* CARDS_ROOT = "/cards";
-constexpr const char* DEFAULT_DECK = "words";  // where "add a word" puts new cards
+constexpr const char* DEFAULT_DECK = "words";         // where "add a word" puts new cards
+constexpr const char* WORDLISTS_ROOT = "/wordlists";  // word lists to discover new words from, <name>.tsv
 
 struct DeckRef {
   std::string name;    // the folder name, shown to the user
@@ -31,6 +32,14 @@ bool appendCard(std::string_view deckName, const Card& card);
 int32_t today(uint32_t visitCounter);
 bool clockIsSet();
 
+// The word lists: the .tsv files of /wordlists, in name order (the names without the extension).
+std::vector<std::string> listWordLists();
+// The cards of the lists the user has marked as known without adding (keys of their words).
+std::vector<uint32_t> loadKnownWords(const std::string& listName);
+bool addKnownWord(const std::string& listName, uint32_t key);
+// Keys of every word already in a deck or marked as known for this list, sorted.
+std::vector<uint32_t> ownedWords(const std::string& listName);
+
 // One deck loaded for study. The file text and the card states live in PSRAM, so a deck of several
 // thousand cards costs the small heap only a 4 byte index entry per card.
 class Deck {
@@ -39,6 +48,8 @@ class Deck {
   static constexpr size_t MAX_CARDS = 20000;
 
   bool open(const DeckRef& ref);
+  // Loads any card file (a word list) without progress.
+  bool openFile(const std::string& path);
   const DeckRef& ref() const { return ref_; }
   size_t size() const { return lineStart_.size(); }
   bool card(size_t index, Card& out) const;
