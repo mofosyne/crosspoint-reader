@@ -17,6 +17,7 @@
       <a href="/settings">Settings</a>
       <a href="/fonts">Fonts</a>
       <a href="/plugins">Plugins</a>
+      <a href="/feeds">Feeds</a>
     </nav>
   </div>
   <details class="mobile-nav">
@@ -33,6 +34,7 @@
       <a href="/settings">Settings</a>
       <a href="/fonts">Fonts</a>
       <a href="/plugins">Plugins</a>
+      <a href="/feeds">Feeds</a>
     </nav>
   </details>
   <script>

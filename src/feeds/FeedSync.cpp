@@ -151,30 +151,28 @@ void FeedSync::fetchDashboardData() {
       }
     }
   }
-  if (config.calendars.empty() || !tlsHeapOk()) return;
+  if (config.calendars.empty()) return;
   status_.headline = "Checking the calendar";
-  // The feeds are saved one after another into one file; a feed that fails keeps the old file.
-  const std::string tmp = std::string(CALENDAR_PATH) + ".tmp";
-  HalFile out;
-  if (!Storage.openFileForWrite(TAG, tmp, out)) return;
-  size_t good = 0;
-  for (const auto& url : config.calendars) {
+  // Each feed is saved to its own file; a feed that fails keeps its old file.
+  for (size_t i = 0; i < config.calendars.size(); ++i) {
+    if (!tlsHeapOk()) return;
     std::string_view body;
-    if (!fetchToBuffer(url, body)) continue;
+    if (!fetchToBuffer(config.calendars[i].url, body)) continue;
     if (body.find("BEGIN:VCALENDAR") == std::string_view::npos) {
-      LOG_ERR(TAG, "Not an iCal feed: %s", url.c_str());
+      LOG_ERR(TAG, "Not an iCal feed (calendar %u)", static_cast<unsigned>(i));
       continue;
     }
-    if (out.write(body.data(), body.size()) == body.size()) {
-      out.write("\n", 1);
-      ++good;
+    const std::string path = calendarPath(i);
+    const std::string tmp = path + ".tmp";
+    HalFile out;
+    if (!Storage.openFileForWrite(TAG, tmp, out)) continue;
+    const bool wrote = out.write(body.data(), body.size()) == body.size();
+    out.close();
+    if (wrote && Storage.replaceFile(tmp.c_str(), path.c_str())) {
+      LOG_INF(TAG, "Saved calendar %u (%u bytes)", static_cast<unsigned>(i), static_cast<unsigned>(body.size()));
+    } else {
+      Storage.remove(tmp.c_str());
     }
-  }
-  out.close();
-  if (good > 0 && Storage.replaceFile(tmp.c_str(), CALENDAR_PATH)) {
-    LOG_INF(TAG, "Saved %u calendar feeds", static_cast<unsigned>(good));
-  } else {
-    Storage.remove(tmp.c_str());
   }
 }
 

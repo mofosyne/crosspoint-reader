@@ -28,6 +28,27 @@ bool validDate(int y, int m, int d) {
   return ry == y && rm == m && rd == d;  // rejects 02-30
 }
 
+bool startsWithNoCase(std::string_view s, size_t at, std::string_view word) {
+  if (at + word.size() > s.size()) return false;
+  for (size_t i = 0; i < word.size(); ++i) {
+    const char c = s[at + i];
+    if ((c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c) != word[i]) return false;
+  }
+  return true;
+}
+
+int weekdayOf(int32_t day) { return ((day + 4) % 7 + 7) % 7; }  // 0 = Sunday; 1970-01-01 was a Thursday
+
+// The nth (1-4) or last (5) given weekday of a month.
+int32_t nthWeekday(int year, int month, int weekday, int nth) {
+  if (nth < 5) {
+    const int32_t first = daysFromCivil(year, month, 1);
+    return first + (weekday - weekdayOf(first) + 7) % 7 + 7 * (nth - 1);
+  }
+  const int32_t last = (month == 12 ? daysFromCivil(year + 1, 1, 1) : daysFromCivil(year, month + 1, 1)) - 1;
+  return last - (weekdayOf(last) - weekday + 7) % 7;
+}
+
 std::string unescape(std::string_view s) {
   std::string out;
   for (size_t i = 0; i < s.size(); ++i) {
@@ -154,6 +175,7 @@ void IcsReader::logicalLine(std::string_view line) {
     allDay_ = haveStart_ = hasUntil_ = false;
     startMinute_ = -1;
     title_.clear();
+    description_.clear();
     freq_.clear();
     interval_ = 1;
     exdates_.clear();
@@ -173,6 +195,8 @@ void IcsReader::logicalLine(std::string_view line) {
     haveStart_ = parseStamp(value, offset_, startDay_, startMinute_, allDay_);
   } else if (name == "SUMMARY") {
     title_ = unescape(value);
+  } else if (name == "DESCRIPTION") {
+    description_ = unescape(value);
   } else if (name == "RRULE") {
     size_t pos = 0;
     while (pos < value.size()) {
@@ -220,6 +244,17 @@ void IcsReader::emit(int32_t day) {
 
 void IcsReader::endEvent() {
   if (!haveStart_) return;
+  if (!region_.empty()) {
+    if (description_.rfind("Observance", 0) == 0) return;
+    const bool regional = description_.find("Public holiday in ") != std::string::npos;
+    if (regional && description_.find(region_) == std::string::npos) return;  // another region's holiday
+    const std::string suffixes[] = {" (regional holiday)", " (" + region_ + ")"};
+    for (const auto& suffix : suffixes) {
+      if (title_.size() > suffix.size() && title_.compare(title_.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        title_.erase(title_.size() - suffix.size());
+      }
+    }
+  }
   if (freq_.empty()) {
     emit(startDay_);
     return;
@@ -269,11 +304,31 @@ void parseManualEvents(std::string_view text, EventList& out, std::vector<std::s
     int y = 0, m = 0, d = 0;
     size_t at = 0;
     bool yearly = false;
-    if (digits(line, 0, 4, y) && line.size() > 4 && line[4] == '-' && digits(line, 5, 2, m) && line.size() > 7 && line[7] == '-' &&
-        digits(line, 8, 2, d)) {
+    int weekday = -1;  // for "XXXX-11-TUE1": the nth weekday of a month, every year
+    int nth = 0;       // 1-4, or 5 for the last one
+    const bool wildcard =
+        line.size() > 5 && (line.substr(0, 4) == "XXXX" || line.substr(0, 4) == "xxxx") && line[4] == '-';
+    if (wildcard && digits(line, 5, 2, m) && line.size() > 8 && line[7] == '-' && digits(line, 8, 2, d)) {
+      yearly = true;  // XXXX-MM-DD
+      at = 10;
+    } else if (wildcard && digits(line, 5, 2, m) && line.size() > 11 && line[7] == '-') {
+      static const char* const DAYS[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+      for (int i = 0; i < 7; ++i) {
+        if (startsWithNoCase(line, 8, DAYS[i])) weekday = i;
+      }
+      const char n = line[11];
+      nth = n >= '1' && n <= '4' ? n - '0' : (n == 'L' || n == 'l') ? 5 : 0;
+      if (weekday < 0 || nth == 0 || m < 1 || m > 12) {
+        if (errors) errors->push_back("Cannot read: " + std::string(line.substr(0, 60)));
+        continue;
+      }
+      yearly = true;
+      at = 12;
+    } else if (digits(line, 0, 4, y) && line.size() > 4 && line[4] == '-' && digits(line, 5, 2, m) && line.size() > 7 &&
+               line[7] == '-' && digits(line, 8, 2, d)) {
       at = 10;
     } else if (digits(line, 0, 2, m) && line.size() > 2 && line[2] == '-' && digits(line, 3, 2, d)) {
-      yearly = true;
+      yearly = true;  // MM-DD, the older form of XXXX-MM-DD
       at = 5;
     } else {
       if (errors) errors->push_back("Cannot read: " + std::string(line.substr(0, 60)));
@@ -293,13 +348,19 @@ void parseManualEvents(std::string_view text, EventList& out, std::vector<std::s
       if (errors) errors->push_back("No title: " + std::string(line.substr(0, 60)));
       continue;
     }
-    if (yearly && !validDate(2024, m, d)) {  // a leap year, so 02-29 is allowed
+    if (yearly && weekday < 0 && !validDate(2024, m, d)) {  // a leap year, so 02-29 is allowed
       if (errors) errors->push_back("Not a date: " + std::string(line.substr(0, 60)));
       continue;
     }
     if (yearly) {
-      for (int year = fromYear; year <= fromYear + 1; ++year) {
-        if (validDate(year, m, d)) out.add(daysFromCivil(year, m, d), minute, title);
+      int toYear, tm, td;
+      civilFromDays(out.to() - 1, toYear, tm, td);
+      for (int year = fromYear; year <= toYear; ++year) {
+        if (weekday >= 0) {
+          out.add(nthWeekday(year, m, weekday, nth), minute, title);
+        } else if (validDate(year, m, d)) {
+          out.add(daysFromCivil(year, m, d), minute, title);
+        }
       }
     } else if (validDate(y, m, d)) {
       out.add(daysFromCivil(y, m, d), minute, title);

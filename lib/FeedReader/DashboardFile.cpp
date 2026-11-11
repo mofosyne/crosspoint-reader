@@ -55,9 +55,9 @@ DashboardConfig parseDashboard(std::string_view text) {
     if (w.empty()) continue;
     const std::string bad = "Cannot read: " + std::string(line.substr(0, 60));
     if (w[0] == "calendar") {
-      if (w.size() == 2 && (w[1].rfind("http://", 0) == 0 || w[1].rfind("https://", 0) == 0) &&
-          config.calendars.size() < 3) {
-        config.calendars.push_back(w[1]);
+      const bool urlOk = w.size() >= 2 && (w[1].rfind("http://", 0) == 0 || w[1].rfind("https://", 0) == 0);
+      if (urlOk && w.size() <= 3 && config.calendars.size() < 5 && (w.size() == 2 || w[2].rfind("region=", 0) == 0)) {
+        config.calendars.push_back({w[1], w.size() == 3 ? w[2].substr(7) : std::string()});
       } else {
         config.errors.push_back(bad);
       }

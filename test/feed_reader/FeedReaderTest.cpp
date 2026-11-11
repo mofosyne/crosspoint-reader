@@ -822,3 +822,72 @@ TEST(Weather, ClothingHasSeparateParts) {
   EXPECT_FALSE(c.umbrella);
   EXPECT_TRUE(c.sunscreen);
 }
+
+TEST(Weather, ReadsMorningMiddayAndAfternoonTemperatures) {
+  const char* json =
+      R"({"hourly":{"time":["2026-11-10T07:00","2026-11-10T08:00","2026-11-10T12:00","2026-11-10T16:00","2026-11-11T08:00"],)"
+      R"("temperature_2m":[9.1,11.6,22.4,25.5,13.0]},)"
+      R"("daily":{"time":["2026-11-10","2026-11-11"],"weather_code":[1,3],"temperature_2m_max":[26,18],)"
+      R"("temperature_2m_min":[9,12],"precipitation_probability_max":[1,2],"uv_index_max":[9,5]}})";
+  feed::Weather w;
+  ASSERT_TRUE(feed::parseOpenMeteo(json, w));
+  ASSERT_EQ(w.days.size(), 2u);
+  EXPECT_TRUE(w.days[0].hasHours);
+  EXPECT_EQ(w.days[0].morningC, 12);
+  EXPECT_EQ(w.days[0].middayC, 22);
+  EXPECT_EQ(w.days[0].afternoonC, 26);
+  EXPECT_EQ(w.days[1].morningC, 13);
+}
+
+TEST(DashboardFile, ReadsCalendarsWithARegion) {
+  const auto c = feed::parseDashboard(
+      "calendar https://a.example/me.ics\n"
+      "calendar https://b.example/holidays.ics region=Victoria # public holidays\n"
+      "calendar ftp://nope\n");
+  ASSERT_EQ(c.calendars.size(), 2u);
+  EXPECT_EQ(c.calendars[0].region, "");
+  EXPECT_EQ(c.calendars[1].url, "https://b.example/holidays.ics");
+  EXPECT_EQ(c.calendars[1].region, "Victoria");
+  EXPECT_EQ(c.errors.size(), 1u);
+}
+
+TEST(Calendar, RegionKeepsOnlyLocalPublicHolidays) {
+  const std::string ics =
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261110\nSUMMARY:New Year\nDESCRIPTION:Public holiday\nEND:VEVENT\n"
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261111\nSUMMARY:Labour Day (Victoria)\n"
+      "DESCRIPTION:Public holiday in Victoria\nEND:VEVENT\n"
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261112\nSUMMARY:Labour Day (Queensland)\n"
+      "DESCRIPTION:Public holiday in Queensland\nEND:VEVENT\n"
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261113\nSUMMARY:Easter Monday (regional holiday)\n"
+      "DESCRIPTION:Public holiday in New South Wales\\, Victoria\nEND:VEVENT\n"
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:20261114\nSUMMARY:Harmony Day\nDESCRIPTION:Observance\\nTo hide\nEND:VEVENT\n";
+  feed::EventList list(feed::daysFromCivil(2026, 11, 8), 14, 20);
+  feed::IcsReader reader(list, 0, "Victoria");
+  reader.feed(ics.data(), ics.size());
+  reader.finish();
+  ASSERT_EQ(list.events().size(), 3u);
+  EXPECT_EQ(list.events()[0].title, "New Year");
+  EXPECT_EQ(list.events()[1].title, "Labour Day");
+  EXPECT_EQ(list.events()[2].title, "Easter Monday");
+}
+
+TEST(Calendar, YearPlaceholderAndFloatingHolidays) {
+  const int32_t from = feed::daysFromCivil(2026, 10, 20);
+  feed::EventList list(from, 400, 20);
+  std::vector<std::string> errors;
+  feed::parseManualEvents(
+      "XXXX-12-25 Christmas\nXXXX-11-TUE1 Melbourne Cup Day\nXXXX-06-MON2 King's Birthday\nXXXX-05-SUNL Last Sunday\n"
+      "XXXX-11-FOO1 broken\n",
+      list, &errors);
+  EXPECT_EQ(errors.size(), 1u);
+  const auto find = [&](const char* title) {
+    for (const auto& e : list.events()) {
+      if (e.title == title) return e.day;
+    }
+    return int32_t(-1);
+  };
+  EXPECT_EQ(find("Christmas"), feed::daysFromCivil(2026, 12, 25));
+  EXPECT_EQ(find("Melbourne Cup Day"), feed::daysFromCivil(2026, 11, 3));  // the first Tuesday
+  EXPECT_EQ(find("King's Birthday"), feed::daysFromCivil(2027, 6, 14));    // the second Monday
+  EXPECT_EQ(find("Last Sunday"), feed::daysFromCivil(2027, 5, 30));
+}

@@ -15,6 +15,10 @@ struct WeatherDay {
   int maxC = 0;
   int rainPercent = 0;
   int uv = 0;  // highest UV index of the day
+  bool hasHours = false;
+  int morningC = 0;    // 08:00
+  int middayC = 0;     // 12:00
+  int afternoonC = 0;  // 16:00
 };
 
 struct Weather {

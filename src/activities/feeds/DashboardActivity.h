@@ -43,4 +43,6 @@ class DashboardActivity final : public Activity {
   std::string latestHeadline_;       // newest unread title
   int32_t today_ = 0;                // local day, days since 1970
   std::vector<feed::Event> events_;  // the next few days
+  bool hasHoliday_ = false;
+  feed::Event holiday_;  // the next public holiday
 };

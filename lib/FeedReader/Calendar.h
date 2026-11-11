@@ -13,7 +13,7 @@ int32_t daysFromCivil(int year, int month, int day);
 void civilFromDays(int32_t days, int& year, int& month, int& day);
 
 struct Event {
-  int32_t day = 0;     // local date, days since 1970
+  int32_t day = 0;      // local date, days since 1970
   int16_t minute = -1;  // minutes after midnight; -1 = all day
   std::string title;
 };
@@ -41,7 +41,11 @@ class EventList {
 // and EXDATE. Events that do not fall in the window are dropped as they are read.
 class IcsReader {
  public:
-  IcsReader(EventList& out, int utcOffsetMinutes) : out_(out), offset_(utcOffsetMinutes) {}
+  // With a `region`, only public holidays that apply there are kept (national ones and ones that name the
+  // region in their description), and observances are dropped. This is how Google's holiday calendars
+  // mark them; "(regional holiday)" and "(<region>)" are cut from the titles.
+  IcsReader(EventList& out, int utcOffsetMinutes, std::string_view region = {})
+      : out_(out), offset_(utcOffsetMinutes), region_(region) {}
   void feed(const char* data, size_t len);
   void finish();
 
@@ -52,6 +56,8 @@ class IcsReader {
 
   EventList& out_;
   int offset_;
+  std::string region_;
+  std::string description_;
   std::string physical_;
   std::string logical_;
   bool inEvent_ = false;

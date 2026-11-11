@@ -52,7 +52,8 @@ std::string openMeteoUrl(double latitude, double longitude, int days) {
   snprintf(buf, sizeof(buf),
            "https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f"
            "&current=temperature_2m,weather_code"
-           "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max"
+           "&hourly=temperature_2m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_"
+           "max,uv_index_max"
            "&timezone=auto&forecast_days=%d",
            latitude, longitude, days);
   return buf;
@@ -91,6 +92,23 @@ bool parseOpenMeteo(std::string_view json, Weather& out) {
     if (i < rain.size()) day.rainPercent = rounded(rain[i]);  // "null" reads as 0
     if (i < uv.size()) day.uv = rounded(uv[i]);
     out.days.push_back(std::move(day));
+  }
+  // Temperatures at 08:00, 12:00 and 16:00 of each day, from the hourly list.
+  const size_t hourly = json.find("\"hourly\":{");
+  if (hourly != std::string_view::npos) {
+    const auto times = items(arrayOf(json, hourly, "time"));
+    const auto temps = items(arrayOf(json, hourly, "temperature_2m"));
+    for (size_t i = 0; i < times.size() && i < temps.size(); ++i) {
+      if (times[i].size() < 13) continue;
+      const std::string date = times[i].substr(0, 10);
+      const int hour = std::atoi(times[i].substr(11, 2).c_str());
+      for (auto& day : out.days) {
+        if (day.date != date) continue;
+        if (hour == 8) day.morningC = rounded(temps[i]), day.hasHours = true;
+        if (hour == 12) day.middayC = rounded(temps[i]);
+        if (hour == 16) day.afternoonC = rounded(temps[i]);
+      }
+    }
   }
   return !out.days.empty();
 }
