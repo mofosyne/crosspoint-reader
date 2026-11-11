@@ -126,26 +126,27 @@ void FlashcardAddActivity::render(RenderLock&&) {
       lines("Looking up " + word_ + " ...", EpdFontFamily::REGULAR, 2);
       break;
     case State::Found:
-      lines(headword_, EpdFontFamily::BOLD, 2);
+      lines(headword_, EpdFontFamily::REGULAR, 2);
       y += lineHeight / 2;
       lines(meaning_, EpdFontFamily::REGULAR, 14);
       break;
     case State::NotFound:
-      lines("\"" + word_ + "\" is not in the dictionary.", EpdFontFamily::BOLD, 3);
+      lines("\"" + word_ + "\" is not in the dictionary.", EpdFontFamily::REGULAR, 3);
       y += lineHeight / 2;
-      lines("You can add any card by hand on the web page (File Transfer, then Flashcards).", EpdFontFamily::REGULAR, 6);
+      lines("You can add any card by hand on the web page (File Transfer, then Flashcards).", EpdFontFamily::REGULAR,
+            6);
       break;
     case State::NoDictionary:
-      lines("No dictionary is selected.", EpdFontFamily::BOLD, 2);
+      lines("No dictionary is selected.", EpdFontFamily::REGULAR, 2);
       y += lineHeight / 2;
       lines("Put a StarDict dictionary in /dictionaries and choose it in the reader's dictionary setting.",
             EpdFontFamily::REGULAR, 6);
       break;
     case State::Added:
-      lines("Added to the " + std::string(flashcards::DEFAULT_DECK) + " deck.", EpdFontFamily::BOLD, 2);
+      lines("Added to the " + std::string(flashcards::DEFAULT_DECK) + " deck.", EpdFontFamily::REGULAR, 2);
       break;
     case State::Failed:
-      lines("That did not work (the lookup or the SD card failed).", EpdFontFamily::BOLD, 3);
+      lines("That did not work (the lookup or the SD card failed).", EpdFontFamily::REGULAR, 3);
       break;
   }
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), state_ == State::Found ? "Add card" : "OK", "", "");

@@ -81,7 +81,8 @@ void FlashcardReviewActivity::answer(const Grade grade) {
 }
 
 int FlashcardReviewActivity::buttonAt(const int x, const int y) const {
-  const int top = renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight - BUTTON_HEIGHT - 8;
+  const int top =
+      renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight - BUTTON_HEIGHT - 8;
   if (y < top || y > top + BUTTON_HEIGHT) return -1;
   const int cell = renderer.getScreenWidth() / 4;
   return std::clamp(x / cell, 0, 3);
@@ -116,9 +117,12 @@ void FlashcardReviewActivity::loop() {
     return;
   }
   if (flipped_) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) answer(Grade::Again);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Down)) answer(Grade::Hard);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) answer(Grade::Easy);
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left))
+      answer(Grade::Again);
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Down))
+      answer(Grade::Hard);
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Right))
+      answer(Grade::Easy);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Right) ||
              mappedInput.wasReleased(MappedInputManager::Button::Down)) {
     flip();
@@ -163,19 +167,19 @@ void FlashcardReviewActivity::render(RenderLock&&) {
   if (!loaded_) {
     centeredLines("This deck could not be opened.", EpdFontFamily::REGULAR, 3);
   } else if (finished_) {
-    centeredLines(answered_ == 0 ? "Nothing to study right now." : "All done.", EpdFontFamily::BOLD, 2);
+    centeredLines(answered_ == 0 ? "Nothing to study right now." : "All done.", EpdFontFamily::REGULAR, 2);
     y += lineHeight;
     centeredLines(answered_ == 0 ? "Come back when cards are due, or add some words."
                                  : std::to_string(answered_) + " cards answered.",
                   EpdFontFamily::REGULAR, 3);
   } else {
     if (!card_.context.empty() && !flipped_) {  // the sentence the word comes from, above it
-      renderer.drawText(UI_10_FONT_ID, x, y, renderer.truncatedText(UI_10_FONT_ID, card_.context.c_str(), textWidth).c_str(),
-                        true);
+      renderer.drawText(UI_10_FONT_ID, x, y,
+                        renderer.truncatedText(UI_10_FONT_ID, card_.context.c_str(), textWidth).c_str(), true);
       y += renderer.getLineHeight(UI_10_FONT_ID) + 12;
     }
     y += lineHeight;
-    centeredLines(card_.front, EpdFontFamily::BOLD, 3);
+    centeredLines(card_.front, EpdFontFamily::REGULAR, 3);  // not bold: a CJK font has no bold face to load
     if (!card_.reading.empty()) {
       y += 4;
       centeredLines(card_.reading, EpdFontFamily::REGULAR, 2);
@@ -207,8 +211,8 @@ void FlashcardReviewActivity::render(RenderLock&&) {
       const int w1 = renderer.getTextWidth(UI_12_FONT_ID, GRADE_NAMES[i], EpdFontFamily::BOLD);
       renderer.drawText(UI_12_FONT_ID, bx + (cell - 8 - w1) / 2, top + 12, GRADE_NAMES[i], true, EpdFontFamily::BOLD);
       const int w2 = renderer.getTextWidth(UI_10_FONT_ID, wait.c_str());
-      renderer.drawText(UI_10_FONT_ID, bx + (cell - 8 - w2) / 2, top + 14 + renderer.getLineHeight(UI_12_FONT_ID), wait.c_str(),
-                        true);
+      renderer.drawText(UI_10_FONT_ID, bx + (cell - 8 - w2) / 2, top + 14 + renderer.getLineHeight(UI_12_FONT_ID),
+                        wait.c_str(), true);
     }
   } else if (loaded_ && !finished_) {
     const char* hint = "Tap to show the answer";
