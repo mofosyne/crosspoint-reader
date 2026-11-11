@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <CommentFeed.h>
 #include <ContentExtract.h>
+#include <HalStorage.h>
 #include <HnComments.h>
 #include <LinkExtractor.h>
 #include <Logging.h>
@@ -86,7 +87,8 @@ bool FeedSync::begin(std::string& error) {
     if (checkAll_ || feed::isDue(source, state.lastCheck, now_)) due_.push_back(std::move(source));
   }
   // With nothing due the run still refreshes the dashboard's weather, when that is on.
-  if (due_.empty() && !(loadDashboardConfig().weather && !parsed.sources.empty())) {
+  const feed::DashboardConfig dashboard = loadDashboardConfig();
+  if (due_.empty() && !((dashboard.weather || !dashboard.calendars.empty()) && !parsed.sources.empty())) {
     error = parsed.sources.empty() ? "The sources file has no usable lines" : "Nothing is due yet";
     if (!parsed.errors.empty()) error += " (" + parsed.errors[0] + ")";
     return false;
@@ -108,7 +110,7 @@ bool FeedSync::step() {
   if (!sourceOpen_) {
     if (current_ >= due_.size() && !weatherDone_) {
       weatherDone_ = true;
-      fetchWeather();
+      fetchDashboardData();
       return true;
     }
     if (current_ >= due_.size()) {
@@ -133,20 +135,47 @@ bool FeedSync::step() {
   return true;
 }
 
-// The dashboard's forecast. Failing to get it is not a sync failure: the dashboard keeps the old one.
-void FeedSync::fetchWeather() {
+// What the dashboard shows: the forecast and the iCal feeds. A failure here is not a sync failure: the
+// dashboard keeps what it had.
+void FeedSync::fetchDashboardData() {
   const feed::DashboardConfig config = loadDashboardConfig();
-  if (!config.weather) return;
-  status_.headline = "Checking the weather";
-  if (!tlsHeapOk()) return;
-  std::string_view body;
-  if (!fetchToBuffer(feed::openMeteoUrl(config.latitude, config.longitude, config.days), body)) return;
-  feed::Weather weather;
-  if (!feed::parseOpenMeteo(body, weather)) {
-    LOG_ERR(TAG, "Weather answer not understood");
-    return;
+  if (config.weather && tlsHeapOk()) {
+    status_.headline = "Checking the weather";
+    std::string_view body;
+    if (fetchToBuffer(feed::openMeteoUrl(config.latitude, config.longitude, config.days), body)) {
+      feed::Weather weather;
+      if (!feed::parseOpenMeteo(body, weather)) {
+        LOG_ERR(TAG, "Weather answer not understood");
+      } else if (!saveWeather(body, now_)) {
+        LOG_ERR(TAG, "Could not save the weather");
+      }
+    }
   }
-  if (!saveWeather(body, now_)) LOG_ERR(TAG, "Could not save the weather");
+  if (config.calendars.empty() || !tlsHeapOk()) return;
+  status_.headline = "Checking the calendar";
+  // The feeds are saved one after another into one file; a feed that fails keeps the old file.
+  const std::string tmp = std::string(CALENDAR_PATH) + ".tmp";
+  HalFile out;
+  if (!Storage.openFileForWrite(TAG, tmp, out)) return;
+  size_t good = 0;
+  for (const auto& url : config.calendars) {
+    std::string_view body;
+    if (!fetchToBuffer(url, body)) continue;
+    if (body.find("BEGIN:VCALENDAR") == std::string_view::npos) {
+      LOG_ERR(TAG, "Not an iCal feed: %s", url.c_str());
+      continue;
+    }
+    if (out.write(body.data(), body.size()) == body.size()) {
+      out.write("\n", 1);
+      ++good;
+    }
+  }
+  out.close();
+  if (good > 0 && Storage.replaceFile(tmp.c_str(), CALENDAR_PATH)) {
+    LOG_INF(TAG, "Saved %u calendar feeds", static_cast<unsigned>(good));
+  } else {
+    Storage.remove(tmp.c_str());
+  }
 }
 
 void FeedSync::startSource(size_t index) {

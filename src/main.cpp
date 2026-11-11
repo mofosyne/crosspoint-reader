@@ -49,6 +49,7 @@
 #include "activities/feeds/DashboardActivity.h"
 #include "activities/feeds/FeedSyncActivity.h"
 #include "activities/feeds/FeedsActivity.h"
+#include "activities/feeds/ScheduledRedrawActivity.h"
 #include "feeds/FeedArticleView.h"
 #include "feeds/FeedStore.h"
 #endif
@@ -482,30 +483,58 @@ static bool holdSleepWhileUsbPowered() {
 
 static volatile bool sleepRequested = false;
 static bool scheduledWake = false;     // this boot came from the daily sync timer
+static bool debugWakeRedraw = false;   // SLEEPTIMER:<s>R wakes for a redraw only
 static uint32_t debugWakeSeconds = 0;  // SLEEPTIMER: debug override of the next wake delay
 void requestDeepSleep() { sleepRequested = true; }
 
 #if CROSSPOINT_FEEDS
-// Seconds until the next daily sync time (local), or 0 when the sync is off, the clock was never set or
-// the battery is too low to be worth waking for.
-static uint32_t secondsToDailySync() {
+static uint32_t plannedWakeSeconds = 0;
+
+// Seconds until the next timed wake, and whether that wake syncs (true) or only redraws the dashboard
+// (false, no Wi-Fi). Syncs run `dailySyncCount` times a day, evenly spaced from `dailySyncHour`; a redraw
+// at 00:05 rolls the date and events over. 0 when no wake is wanted: the setting is off, the dashboard is
+// not what the panel will show, the clock was never set, or the battery is low.
+static uint32_t planNextWake(bool& syncWake) {
+  syncWake = !debugWakeRedraw;
   if (debugWakeSeconds != 0) return debugWakeSeconds;
-  if (!SETTINGS.dailySync || powerManager.getBatteryPercentage() < 20) return 0;
+  if (!SETTINGS.dailySync || !DashboardActivity::wantedOnSleep() || powerManager.getBatteryPercentage() < 20) return 0;
   const time_t now = time(nullptr);
   if (now < 1700000000) return 0;
-  struct tm when;
-  localtime_r(&now, &when);
-  when.tm_hour = SETTINGS.dailySyncHour;
-  when.tm_min = 0;
-  when.tm_sec = 0;
-  when.tm_isdst = -1;
-  time_t at = mktime(&when);
-  if (at <= now + 120) {  // today's time has passed: tomorrow's
-    when.tm_mday += 1;
+  struct tm today;
+  localtime_r(&now, &today);
+  const auto nextAt = [&](int hour, int minute) {
+    struct tm when = today;
+    when.tm_hour = hour;
+    when.tm_min = minute;
+    when.tm_sec = 0;
     when.tm_isdst = -1;
-    at = mktime(&when);
+    time_t at = mktime(&when);
+    if (at <= now + 120) {  // already past today: tomorrow
+      when.tm_mday += 1;
+      when.tm_isdst = -1;
+      at = mktime(&when);
+    }
+    return at;
+  };
+  const int count = std::clamp<int>(SETTINGS.dailySyncCount, 1, 4);
+  time_t best = 0;
+  bool bestSyncs = true;
+  bool midnightSync = false;
+  for (int k = 0; k < count; ++k) {
+    const int hour = (SETTINGS.dailySyncHour + k * 24 / count) % 24;
+    midnightSync |= hour == 0;
+    const time_t at = nextAt(hour, 0);
+    if (best == 0 || at < best) best = at;
   }
-  return at > now ? static_cast<uint32_t>(at - now) : 0;
+  if (!midnightSync) {  // a sync at midnight already redraws
+    const time_t at = nextAt(0, 5);
+    if (at < best) {
+      best = at;
+      bestSyncs = false;
+    }
+  }
+  syncWake = bestSyncs;
+  return best > now ? static_cast<uint32_t>(best - now) : 0;
 }
 #endif
 
@@ -544,6 +573,9 @@ void enterDeepSleep(bool fromTimeout = false) {
   // it visible until the first useful reader or home paint replaces it.
   APP_STATE.showBootScreen = false;
 
+#if CROSSPOINT_FEEDS
+  plannedWakeSeconds = planNextWake(APP_STATE.pendingSync);  // saved below, so the wake knows what it is for
+#endif
   APP_STATE.saveToFile();
 
   activityManager.goToSleep(fromTimeout);
@@ -577,9 +609,10 @@ void enterDeepSleep(bool fromTimeout = false) {
   LOG_DBG("MAIN", "Entering deep sleep");
 
 #if CROSSPOINT_FEEDS
-  if (const uint32_t wakeIn = secondsToDailySync()) {
-    LOG_INF("MAIN", "Daily sync wake in %lu s", static_cast<unsigned long>(wakeIn));
-    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(wakeIn) * 1000000ULL);
+  if (plannedWakeSeconds != 0) {
+    LOG_INF("MAIN", "Timed wake in %lu s (%s)", static_cast<unsigned long>(plannedWakeSeconds),
+            APP_STATE.pendingSync ? "sync" : "redraw");
+    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(plannedWakeSeconds) * 1000000ULL);
   }
 #endif
 
@@ -874,9 +907,11 @@ void setup() {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
 #if CROSSPOINT_FEEDS
-  } else if (scheduledWake) {
+  } else if (scheduledWake && APP_STATE.pendingSync) {
     activityManager.replaceActivity(std::make_unique<FeedSyncActivity>(renderer, mappedInputManager,
                                                                        /*checkAll=*/false, /*scheduled=*/true));
+  } else if (scheduledWake) {
+    activityManager.replaceActivity(std::make_unique<ScheduledRedrawActivity>(renderer, mappedInputManager));
 #endif
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
@@ -986,6 +1021,7 @@ static void sendDebugText(const char* tag, const std::string& text) {
 static void handleCommand(const String& cmd) {
   if (cmd.startsWith("SLEEPTIMER:")) {  // sleep, and wake by the timer after N seconds (tests the daily sync)
     debugWakeSeconds = static_cast<uint32_t>(cmd.substring(11).toInt());
+    debugWakeRedraw = cmd.endsWith("R");
     enterDeepSleep(false);
     return;
   }

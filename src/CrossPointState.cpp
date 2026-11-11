@@ -49,6 +49,7 @@ void CrossPointState::toJson(JsonDocument& doc) const {
   doc["resumeContainer"] = resumeContainer;
   doc["resumeTarget"] = resumeTarget;
   doc["resumePage"] = resumePage;
+  doc["pendingSync"] = pendingSync;
 }
 
 bool CrossPointState::fromJson(JsonVariantConst doc) {
@@ -67,5 +68,6 @@ bool CrossPointState::fromJson(JsonVariantConst doc) {
   resumeContainer = doc["resumeContainer"] | "";
   resumeTarget = doc["resumeTarget"] | "";
   resumePage = doc["resumePage"] | 0;
+  pendingSync = doc["pendingSync"] | true;
   return true;
 }

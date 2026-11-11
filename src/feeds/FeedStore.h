@@ -1,6 +1,7 @@
 #pragma once
 
 #include <CachedArticle.h>
+#include <Calendar.h>
 #include <DashboardFile.h>
 #include <HalMemory.h>
 #include <SeenSet.h>
@@ -18,6 +19,8 @@ namespace feeds {
 
 constexpr const char* SOURCES_PATH = "/feeds/sources.txt";
 constexpr const char* DASHBOARD_PATH = "/feeds/dashboard.txt";
+constexpr const char* EVENTS_PATH = "/feeds/events.txt";      // written by hand or on the web page
+constexpr const char* CALENDAR_PATH = "/feeds/calendar.ics";  // iCal feeds saved by a sync
 
 // File name part of an article: 16 hex digits of the URL's hash.
 std::string itemName(const std::string& url);
@@ -27,6 +30,9 @@ bool loadSources(feed::SourcesParse& out);  // false when the file is missing or
 
 // The dashboard settings; the defaults when the file is missing.
 feed::DashboardConfig loadDashboardConfig();
+
+// Adds the events of the hand-written file and of the saved iCal feeds that fall in `out`'s window.
+void loadEvents(feed::EventList& out);
 
 struct SourceState {
   feed::SeenSet seen;

@@ -220,6 +220,8 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                            StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Value(StrId::STR_DAILY_SYNC_HOUR, &CrossPointSettings::dailySyncHour, {0, 23, 1}, "dailySyncHour",
                           StrId::STR_CAT_SYSTEM));
+  emit(SettingInfo::Value(StrId::STR_DAILY_SYNC_COUNT, &CrossPointSettings::dailySyncCount, {1, 4, 1}, "dailySyncCount",
+                          StrId::STR_CAT_SYSTEM));
 #endif
 
   // OPDS download folder: persisted + web-exposed, but category-less so it

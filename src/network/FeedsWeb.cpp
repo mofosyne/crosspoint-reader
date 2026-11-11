@@ -1,5 +1,6 @@
 #include "FeedsWeb.h"
 
+#include <Calendar.h>
 #include <DashboardFile.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -14,6 +15,7 @@ namespace {
 
 constexpr size_t MAX_SOURCES_BYTES = 32 * 1024;
 constexpr size_t MAX_DASHBOARD_BYTES = 4 * 1024;
+constexpr size_t MAX_EVENTS_BYTES = 16 * 1024;
 
 const char PAGE[] = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -35,10 +37,17 @@ code{background:#eee;padding:0 .2rem}
 <pre id="sources-msg"></pre>
 
 <h2>Dashboard</h2>
-<p>Weather: <code>weather LATITUDE LONGITUDE name=Melbourne days=4</code> or <code>weather off</code></p>
+<p>Weather: <code>weather LATITUDE LONGITUDE name=Melbourne days=4</code> or <code>weather off</code><br>
+Calendar feed (iCal, fetched on each sync): <code>calendar https://example.com/me.ics</code></p>
 <textarea id="dashboard" spellcheck="false" style="height:6rem"></textarea>
 <div><button onclick="save('dashboard')">Save dashboard</button></div>
 <pre id="dashboard-msg"></pre>
+
+<h2>Events</h2>
+<p>One per line: <code>2026-11-20 09:00 Dentist</code> (time optional) or <code>11-20 Mum's birthday</code> (every year)</p>
+<textarea id="events" spellcheck="false" style="height:9rem"></textarea>
+<div><button onclick="save('events')">Save events</button></div>
+<pre id="events-msg"></pre>
 
 <script>
 async function load(name){
@@ -53,7 +62,7 @@ async function save(name){
     msg.textContent = await r.text();
   }catch(e){ msg.textContent = 'Failed: '+e; }
 }
-load('sources'); load('dashboard');
+load('sources'); load('dashboard'); load('events');
 </script></body></html>
 )HTML";
 
@@ -64,12 +73,13 @@ void sendFeedsPage(WebServer& server) { server.send(200, "text/html", PAGE); }
 void handleFeedsFile(WebServer& server) {
   const String name = server.arg("name");
   const bool sources = name == "sources";
-  if (!sources && name != "dashboard") {
-    server.send(400, "text/plain", "name must be sources or dashboard");
+  const bool events = name == "events";
+  if (!sources && !events && name != "dashboard") {
+    server.send(400, "text/plain", "name must be sources, dashboard or events");
     return;
   }
-  const char* path = sources ? feeds::SOURCES_PATH : feeds::DASHBOARD_PATH;
-  const size_t limit = sources ? MAX_SOURCES_BYTES : MAX_DASHBOARD_BYTES;
+  const char* path = sources ? feeds::SOURCES_PATH : events ? feeds::EVENTS_PATH : feeds::DASHBOARD_PATH;
+  const size_t limit = sources ? MAX_SOURCES_BYTES : events ? MAX_EVENTS_BYTES : MAX_DASHBOARD_BYTES;
 
   if (server.method() == HTTP_GET) {
     std::string text;
@@ -97,6 +107,9 @@ void handleFeedsFile(WebServer& server) {
     const auto parsed = feed::parseSources(body.c_str());
     reply += " " + std::to_string(parsed.sources.size()) + " sources.";
     errors = parsed.errors;
+  } else if (events) {
+    feed::EventList all(0, 100000, 1);  // only here to collect the lines that cannot be read
+    feed::parseManualEvents(body.c_str(), all, &errors);
   } else {
     errors = feed::parseDashboard(body.c_str()).errors;
   }

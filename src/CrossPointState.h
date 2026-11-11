@@ -26,6 +26,8 @@ class CrossPointState : public PersistableStore<CrossPointState> {
   std::string resumeContainer;
   std::string resumeTarget;
   int32_t resumePage = 0;
+  // The timer wake that is armed is a feed sync (true) or only a dashboard redraw (false).
+  bool pendingSync = true;
 
   static const char* getFilePath() { return "/.crosspoint/state.json"; }
   void toJson(JsonDocument& doc) const;

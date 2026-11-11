@@ -45,10 +45,24 @@ DashboardConfig parseDashboard(std::string_view text) {
     if (eol == std::string_view::npos) eol = text.size();
     std::string_view line = text.substr(pos, eol - pos);
     pos = eol + 1;
-    if (const size_t hash = line.find('#'); hash != std::string_view::npos) line = line.substr(0, hash);
+    for (size_t i = 0; i < line.size(); ++i) {  // a '#' starts a comment, unless it is inside a word (a URL)
+      if (line[i] == '#' && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t')) {
+        line = line.substr(0, i);
+        break;
+      }
+    }
     const auto w = words(line);
     if (w.empty()) continue;
     const std::string bad = "Cannot read: " + std::string(line.substr(0, 60));
+    if (w[0] == "calendar") {
+      if (w.size() == 2 && (w[1].rfind("http://", 0) == 0 || w[1].rfind("https://", 0) == 0) &&
+          config.calendars.size() < 3) {
+        config.calendars.push_back(w[1]);
+      } else {
+        config.errors.push_back(bad);
+      }
+      continue;
+    }
     if (w[0] != "weather") {
       config.errors.push_back(bad);
       continue;

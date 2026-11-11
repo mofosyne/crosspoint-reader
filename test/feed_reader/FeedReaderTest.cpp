@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "CachedArticle.h"
+#include "Calendar.h"
 #include "CommentFeed.h"
 #include "ContentExtract.h"
 #include "DashboardFile.h"
@@ -696,4 +697,128 @@ TEST(DashboardFile, CanTurnTheForecastOffAndReportsMistakes) {
   const auto c = feed::parseDashboard("weather off\nweather 100 0\nsnow 1 2\n");
   EXPECT_FALSE(c.weather);
   EXPECT_EQ(c.errors.size(), 2u);
+}
+
+TEST(Weather, AdvisesWhatToWear) {
+  feed::WeatherDay cold{"2026-07-01", 3, 4, 11, 60, 1};
+  EXPECT_EQ(feed::clothingAdvice(cold), "Coat, umbrella");
+  feed::WeatherDay swing{"2026-11-08", 1, 6, 22, 0, 9};
+  EXPECT_EQ(feed::clothingAdvice(swing), "Light layer, layers, sunscreen");
+  feed::WeatherDay hot{"2026-01-08", 0, 20, 33, 5, 11};
+  EXPECT_EQ(feed::clothingAdvice(hot), "T-shirt, sunscreen");
+  feed::WeatherDay coldMorning{"2026-11-10", 2, 10, 27, 16, 5};
+  EXPECT_EQ(feed::clothingAdvice(coldMorning), "T-shirt, layers");
+}
+
+TEST(Weather, ReadsTheUvIndex) {
+  const char* json =
+      R"({"daily":{"time":["2026-11-08"],"weather_code":[1],"temperature_2m_max":[20],"temperature_2m_min":[8],)"
+      R"("precipitation_probability_max":[10],"uv_index_max":[8.6]}})";
+  feed::Weather w;
+  ASSERT_TRUE(feed::parseOpenMeteo(json, w));
+  EXPECT_EQ(w.days[0].uv, 9);
+}
+
+TEST(Calendar, CivilDatesRoundTrip) {
+  EXPECT_EQ(feed::daysFromCivil(1970, 1, 1), 0);
+  const int32_t d = feed::daysFromCivil(2026, 11, 8);
+  int y, m, day;
+  feed::civilFromDays(d, y, m, day);
+  EXPECT_EQ(y, 2026);
+  EXPECT_EQ(m, 11);
+  EXPECT_EQ(day, 8);
+}
+
+TEST(Calendar, ManualEventsAreSortedAndWindowed) {
+  const int32_t from = feed::daysFromCivil(2026, 11, 8);
+  feed::EventList list(from, 7, 10);
+  std::vector<std::string> errors;
+  feed::parseManualEvents(
+      "# plans\n2026-11-10 14:30 Dentist\n2026-11-10 Pay rent\n2026-12-25 Far away\n11-12 Birthday\nnonsense\n"
+      "2026-02-30 Bad date\n",
+      list, &errors);
+  ASSERT_EQ(list.events().size(), 3u);
+  EXPECT_EQ(list.events()[0].title, "Pay rent");  // all-day first on a day
+  EXPECT_EQ(list.events()[1].title, "Dentist");
+  EXPECT_EQ(feed::clockText(list.events()[1].minute), "14:30");
+  EXPECT_EQ(list.events()[2].title, "Birthday");
+  EXPECT_EQ(errors.size(), 2u);
+}
+
+TEST(Calendar, ListKeepsOnlyTheEarliestEvents) {
+  feed::EventList list(100, 10, 2);
+  list.add(105, -1, "c");
+  list.add(101, -1, "a");
+  list.add(103, -1, "b");
+  ASSERT_EQ(list.events().size(), 2u);
+  EXPECT_EQ(list.events()[1].title, "b");
+}
+
+TEST(Calendar, ReadsIcsEventsInPieces) {
+  const std::string ics =
+      "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261110\r\nSUMMARY:School\\, term\r\n"
+      "  ends\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART:20261109T230000Z\r\nSUMMARY:Call\r\nEND:VEVENT\r\n"
+      "BEGIN:VEVENT\r\nDTSTART:20300101T000000Z\r\nSUMMARY:Later\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+  feed::EventList list(feed::daysFromCivil(2026, 11, 8), 7, 10);
+  feed::IcsReader reader(list, 11 * 60);  // UTC+11
+  for (size_t i = 0; i < ics.size(); i += 7) reader.feed(ics.data() + i, std::min<size_t>(7, ics.size() - i));
+  reader.finish();
+  ASSERT_EQ(list.events().size(), 2u);
+  EXPECT_EQ(list.events()[0].title, "School, term ends");  // all day on the 10th comes first
+  EXPECT_EQ(list.events()[0].day, feed::daysFromCivil(2026, 11, 10));
+  EXPECT_EQ(list.events()[1].title, "Call");
+  EXPECT_EQ(list.events()[1].day, feed::daysFromCivil(2026, 11, 10));  // 23:00Z is 10:00 the next day
+  EXPECT_EQ(feed::clockText(list.events()[1].minute), "10:00");
+}
+
+TEST(Calendar, ExpandsSimpleRepeats) {
+  const std::string ics =
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:20250101\nSUMMARY:Weekly\nRRULE:FREQ=WEEKLY\nEND:VEVENT\n"
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:19900311\nSUMMARY:Birthday\nRRULE:FREQ=YEARLY\nEND:VEVENT\n"
+      "BEGIN:VEVENT\nDTSTART;VALUE=DATE:20260105\nSUMMARY:Daily\nRRULE:FREQ=DAILY;UNTIL=20261109\n"
+      "EXDATE;VALUE=DATE:20261108\nEND:VEVENT\n";
+  feed::EventList list(feed::daysFromCivil(2026, 11, 8), 7, 20);
+  feed::IcsReader reader(list, 0);
+  reader.feed(ics.data(), ics.size());
+  reader.finish();
+  int weekly = 0, daily = 0, birthday = 0;
+  for (const auto& e : list.events()) {
+    weekly += e.title == "Weekly";
+    daily += e.title == "Daily";
+    birthday += e.title == "Birthday";
+  }
+  EXPECT_EQ(weekly, 1);    // one Wednesday in the window
+  EXPECT_EQ(daily, 1);     // the 8th is excluded, the 9th is the last
+  EXPECT_EQ(birthday, 0);  // March is not in the window
+}
+
+TEST(Calendar, LabelsDays) {
+  EXPECT_EQ(feed::dayLabel(feed::daysFromCivil(2026, 11, 8)), "Sun 8");
+  EXPECT_EQ(feed::dayLabel(0), "Thu 1");
+}
+
+TEST(Calendar, RejectsAnImpossibleYearlyDate) {
+  feed::EventList list(feed::daysFromCivil(2026, 1, 1), 365, 10);
+  std::vector<std::string> errors;
+  feed::parseManualEvents("99-99 oops\n02-29 Leap day\n", list, &errors);
+  EXPECT_EQ(errors.size(), 1u);
+}
+
+TEST(Weather, PicksAnIconForTheCode) {
+  EXPECT_EQ(feed::weatherIcon(0), feed::WeatherIcon::Sun);
+  EXPECT_EQ(feed::weatherIcon(2), feed::WeatherIcon::PartlyCloudy);
+  EXPECT_EQ(feed::weatherIcon(53), feed::WeatherIcon::Rain);
+  EXPECT_EQ(feed::weatherIcon(81), feed::WeatherIcon::Rain);
+  EXPECT_EQ(feed::weatherIcon(73), feed::WeatherIcon::Snow);
+  EXPECT_EQ(feed::weatherIcon(95), feed::WeatherIcon::Storm);
+  EXPECT_EQ(feed::weatherIcon(45), feed::WeatherIcon::Fog);
+}
+
+TEST(Weather, ClothingHasSeparateParts) {
+  feed::WeatherDay d{"2026-11-10", 2, 10, 27, 16, 9};
+  const auto c = feed::clothingFor(d);
+  EXPECT_EQ(c.outer, feed::Outer::TShirt);
+  EXPECT_TRUE(c.layers);
+  EXPECT_FALSE(c.umbrella);
+  EXPECT_TRUE(c.sunscreen);
 }

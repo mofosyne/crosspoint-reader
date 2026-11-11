@@ -59,7 +59,7 @@ class FeedSync {
   void appendCommentFeed(const std::string& feedUrl, const Pending& item, char* work, size_t& used,
                          std::vector<feed::CachedArticle::Link>& links);
   void readPending();
-  void fetchWeather();
+  void fetchDashboardData();
 
   bool checkAll_;
   Status status_;

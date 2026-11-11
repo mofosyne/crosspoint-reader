@@ -52,7 +52,7 @@ std::string openMeteoUrl(double latitude, double longitude, int days) {
   snprintf(buf, sizeof(buf),
            "https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f"
            "&current=temperature_2m,weather_code"
-           "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+           "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max"
            "&timezone=auto&forecast_days=%d",
            latitude, longitude, days);
   return buf;
@@ -70,7 +70,8 @@ bool parseOpenMeteo(std::string_view json, Weather& out) {
     const size_t t = json.find(needle, current);
     if (t != std::string_view::npos) {
       const size_t end = json.find('"', t + needle.size());
-      if (end != std::string_view::npos) out.nowTime = std::string(json.substr(t + needle.size(), end - t - needle.size()));
+      if (end != std::string_view::npos)
+        out.nowTime = std::string(json.substr(t + needle.size(), end - t - needle.size()));
     }
   }
   const size_t daily = json.find("\"daily\":{");
@@ -80,6 +81,7 @@ bool parseOpenMeteo(std::string_view json, Weather& out) {
   const auto maxes = items(arrayOf(json, daily, "temperature_2m_max"));
   const auto mins = items(arrayOf(json, daily, "temperature_2m_min"));
   const auto rain = items(arrayOf(json, daily, "precipitation_probability_max"));
+  const auto uv = items(arrayOf(json, daily, "uv_index_max"));
   for (size_t i = 0; i < dates.size(); ++i) {
     WeatherDay day;
     day.date = dates[i];
@@ -87,42 +89,127 @@ bool parseOpenMeteo(std::string_view json, Weather& out) {
     if (i < maxes.size()) day.maxC = rounded(maxes[i]);
     if (i < mins.size()) day.minC = rounded(mins[i]);
     if (i < rain.size()) day.rainPercent = rounded(rain[i]);  // "null" reads as 0
+    if (i < uv.size()) day.uv = rounded(uv[i]);
     out.days.push_back(std::move(day));
   }
   return !out.days.empty();
 }
 
-const char* weatherText(int code) {
+Clothing clothingFor(const WeatherDay& day) {
+  Clothing c;
+  c.outer = day.maxC < 10   ? Outer::WarmCoat
+            : day.maxC < 15 ? Outer::Coat
+            : day.maxC < 20 ? Outer::Jacket
+            : day.maxC < 25 ? Outer::LightLayer
+                            : Outer::TShirt;
+  c.layers = day.minC < 15 && day.maxC >= 18 && day.maxC - day.minC >= 8;  // cold start, warm afternoon
+  c.umbrella = day.rainPercent >= 40;
+  c.sunscreen = day.uv >= 6;
+  return c;
+}
+
+const char* outerName(Outer outer) {
+  switch (outer) {
+    case Outer::WarmCoat:
+      return "Warm coat";
+    case Outer::Coat:
+      return "Coat";
+    case Outer::Jacket:
+      return "Jacket";
+    case Outer::LightLayer:
+      return "Light layer";
+    case Outer::TShirt:
+      return "T-shirt";
+  }
+  return "";
+}
+
+std::string clothingAdvice(const WeatherDay& day) {
+  const Clothing c = clothingFor(day);
+  std::string out = outerName(c.outer);
+  if (c.layers) out += ", layers";
+  if (c.umbrella) out += ", umbrella";
+  if (c.sunscreen) out += ", sunscreen";
+  return out;
+}
+
+WeatherIcon weatherIcon(int code) {
   switch (code) {
-    case 0: return "Clear";
-    case 1: return "Mostly clear";
-    case 2: return "Partly cloudy";
-    case 3: return "Cloudy";
+    case 0:
+    case 1:
+      return WeatherIcon::Sun;
+    case 2:
+      return WeatherIcon::PartlyCloudy;
+    case 3:
+      return WeatherIcon::Cloud;
     case 45:
-    case 48: return "Fog";
-    case 51:
-    case 53:
-    case 55: return "Drizzle";
-    case 56:
-    case 57: return "Freezing drizzle";
-    case 61: return "Light rain";
-    case 63: return "Rain";
-    case 65: return "Heavy rain";
-    case 66:
-    case 67: return "Freezing rain";
+    case 48:
+      return WeatherIcon::Fog;
     case 71:
     case 73:
     case 75:
-    case 77: return "Snow";
-    case 80:
-    case 81: return "Showers";
-    case 82: return "Heavy showers";
+    case 77:
     case 85:
-    case 86: return "Snow showers";
-    case 95: return "Thunderstorm";
+    case 86:
+      return WeatherIcon::Snow;
+    case 95:
     case 96:
-    case 99: return "Thunderstorm, hail";
-    default: return "";
+    case 99:
+      return WeatherIcon::Storm;
+    default:
+      return code >= 51 ? WeatherIcon::Rain : WeatherIcon::Cloud;
+  }
+}
+
+const char* weatherText(int code) {
+  switch (code) {
+    case 0:
+      return "Clear";
+    case 1:
+      return "Mostly clear";
+    case 2:
+      return "Partly cloudy";
+    case 3:
+      return "Cloudy";
+    case 45:
+    case 48:
+      return "Fog";
+    case 51:
+    case 53:
+    case 55:
+      return "Drizzle";
+    case 56:
+    case 57:
+      return "Freezing drizzle";
+    case 61:
+      return "Light rain";
+    case 63:
+      return "Rain";
+    case 65:
+      return "Heavy rain";
+    case 66:
+    case 67:
+      return "Freezing rain";
+    case 71:
+    case 73:
+    case 75:
+    case 77:
+      return "Snow";
+    case 80:
+    case 81:
+      return "Showers";
+    case 82:
+      return "Heavy showers";
+    case 85:
+    case 86:
+      return "Snow showers";
+    case 95:
+      return "Thunderstorm";
+    case 96:
+    case 99:
+      return "Thunderstorm, hail";
+    default:
+      return "";
   }
 }
 

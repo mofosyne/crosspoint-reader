@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 namespace feeds {
 namespace {
@@ -40,6 +41,29 @@ feed::DashboardConfig loadDashboardConfig() {
   std::string text;
   if (!Storage.readFileToString(TAG, DASHBOARD_PATH, 4096, text)) return feed::DashboardConfig{};
   return feed::parseDashboard(text);
+}
+
+void loadEvents(feed::EventList& out) {
+  std::string manual;
+  if (Storage.readFileToString(TAG, EVENTS_PATH, 16 * 1024, manual)) feed::parseManualEvents(manual, out);
+
+  HalFile f;
+  if (!Storage.openFileForRead(TAG, CALENDAR_PATH, f)) return;
+  // Times in an iCal feed are often UTC: shift them by the offset the clock is using now.
+  const time_t now = time(nullptr);
+  struct tm local, utc;
+  localtime_r(&now, &local);
+  gmtime_r(&now, &utc);
+  utc.tm_isdst = -1;
+  local.tm_isdst = -1;
+  const int offsetMinutes = static_cast<int>((mktime(&local) - mktime(&utc)) / 60);
+  feed::IcsReader reader(out, offsetMinutes);
+  char chunk[512];
+  for (int n = f.read(chunk, sizeof(chunk)); n > 0; n = f.read(chunk, sizeof(chunk))) {
+    reader.feed(chunk, static_cast<size_t>(n));
+  }
+  reader.finish();
+  f.close();
 }
 
 bool loadState(const std::string& sourceId, SourceState& out) {

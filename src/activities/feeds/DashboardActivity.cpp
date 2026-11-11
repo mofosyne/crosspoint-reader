@@ -10,11 +10,13 @@
 #include "CrossPointState.h"
 #include "FeedSyncActivity.h"
 #include "MappedInputManager.h"
+#include "WeatherIcons.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
-constexpr size_t MAX_HEADLINES = 8;
+constexpr size_t MAX_EVENTS = 6;
+constexpr int EVENT_DAYS = 7;
 constexpr time_t CLOCK_SET_AFTER = 1700000000;  // before about 2023 the clock was never set
 }  // namespace
 
@@ -44,11 +46,24 @@ void DashboardActivity::load() {
   if (feeds::loadSources(parsed)) {
     for (const auto& source : parsed.sources) sources_.push_back({source.name, feeds::countUnread(source.id)});
   }
-  headlines_.clear();
-  for (const auto& item : feeds::listItems("", 60)) {
+  unreadTotal_ = 0;
+  for (const auto& source : sources_) unreadTotal_ += source.unread;
+  latestHeadline_.clear();
+  for (const auto& item : feeds::listItems("", 20)) {
     if (item.read) continue;
-    headlines_.push_back(item.title);
-    if (headlines_.size() >= MAX_HEADLINES) break;
+    latestHeadline_ = item.title;
+    break;
+  }
+
+  events_.clear();
+  const time_t now = time(nullptr);
+  if (now > CLOCK_SET_AFTER) {
+    struct tm local;
+    localtime_r(&now, &local);
+    today_ = feed::daysFromCivil(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
+    feed::EventList list(today_, EVENT_DAYS, MAX_EVENTS);
+    feeds::loadEvents(list);
+    events_ = list.events();
   }
 }
 
@@ -119,25 +134,47 @@ void DashboardActivity::drawPage(const bool withHints) {
       renderer.drawText(UI_12_FONT_ID, x, y, "No forecast yet. Press Sync.", true);
       y += lineHeight;
     } else {
-      if (weather_.hasNow) {
+      constexpr int BIG = 64;
+      constexpr int SMALL = 28;
+      const int bigHeight = renderer.getLineHeight(NOTOSANS_18_FONT_ID);
+      if (weather_.hasNow) {  // the big symbol, the temperature and the words
+        drawWeatherIcon(renderer, feed::weatherIcon(weather_.nowCode), x, y, BIG);
         const std::string temp = std::to_string(weather_.nowC) + "\xC2\xB0";
-        renderer.drawText(NOTOSANS_18_FONT_ID, x, y, temp.c_str(), true, EpdFontFamily::BOLD);
-        const int tempWidth = renderer.getTextWidth(NOTOSANS_18_FONT_ID, temp.c_str(), EpdFontFamily::BOLD);
-        renderer.drawText(UI_12_FONT_ID, x + tempWidth + 12, y + 6, feed::weatherText(weather_.nowCode), true);
-        y += renderer.getLineHeight(NOTOSANS_18_FONT_ID) + 4;
+        const int textX = x + BIG + 16;
+        renderer.drawText(NOTOSANS_18_FONT_ID, textX, y + (BIG - bigHeight) / 2 - 8, temp.c_str(), true,
+                          EpdFontFamily::BOLD);
+        renderer.drawText(UI_12_FONT_ID, textX, y + (BIG - bigHeight) / 2 - 8 + bigHeight,
+                          feed::weatherText(weather_.nowCode), true);
+        y += BIG + 10;
       }
-      for (const auto& day : weather_.days) {
+      {  // what to wear and bring, as symbols with a word under each
+        const feed::Clothing wear = feed::clothingFor(weather_.days[0]);
+        constexpr int ICON = 44;
+        const int cell = textWidth / 4;
+        int slot = 0;
+        const auto item = [&](const char* label, auto&& draw) {
+          const int cx = x + slot * cell + cell / 2;
+          draw(cx - ICON / 2);
+          const int w = renderer.getTextWidth(UI_10_FONT_ID, label);
+          renderer.drawText(UI_10_FONT_ID, cx - w / 2, y + ICON + 2, label, true);
+          ++slot;
+        };
+        item(feed::outerName(wear.outer), [&](int ix) { drawOuterIcon(renderer, wear.outer, ix, y, ICON); });
+        if (wear.layers) item("Layers", [&](int ix) { drawLayersIcon(renderer, ix, y, ICON); });
+        if (wear.umbrella) item("Umbrella", [&](int ix) { drawUmbrellaIcon(renderer, ix, y, ICON); });
+        if (wear.sunscreen) item("Sunscreen", [&](int ix) { drawSunscreenIcon(renderer, ix, y, ICON); });
+        y += ICON + smallHeight + 6;
+      }
+      for (const auto& day : weather_.days) {  // one row a day: the weekday, a small symbol, the range, the rain
         const std::string name = feed::weekdayName(day.date);
         const std::string range = std::to_string(day.minC) + "-" + std::to_string(day.maxC) + "\xC2\xB0";
         const std::string rain = std::to_string(day.rainPercent) + "%";
         renderer.drawText(UI_12_FONT_ID, x, y, name.c_str(), true);
-        renderer.drawText(UI_12_FONT_ID, x + 60, y,
-                          renderer.truncatedText(UI_12_FONT_ID, feed::weatherText(day.code), textWidth - 230).c_str(),
-                          true);
+        drawWeatherIcon(renderer, feed::weatherIcon(day.code), x + 70, y - 2, SMALL);
         renderer.drawText(UI_12_FONT_ID, width - x - 160, y, range.c_str(), true);
         renderer.drawText(UI_12_FONT_ID, width - x - renderer.getTextWidth(UI_12_FONT_ID, rain.c_str()), y,
                           rain.c_str(), true);
-        y += lineHeight;
+        y += SMALL + 4;
       }
       if (weatherFetched_ > CLOCK_SET_AFTER) {
         struct tm local;
@@ -153,27 +190,38 @@ void DashboardActivity::drawPage(const bool withHints) {
     rule();
   }
 
-  // ---- feeds
-  heading("FEEDS");
-  if (sources_.empty()) {
-    renderer.drawText(UI_12_FONT_ID, x, y, "No sources yet.", true);
+  // ---- events
+  heading("COMING UP");
+  if (events_.empty()) {
+    renderer.drawText(UI_12_FONT_ID, x, y, "Nothing in the next 7 days.", true);
     y += lineHeight;
   }
-  for (const auto& source : sources_) {
-    const std::string count = std::to_string(source.unread);
-    renderer.drawText(UI_12_FONT_ID, x, y,
-                      renderer.truncatedText(UI_12_FONT_ID, source.name.c_str(), textWidth - 60).c_str(), true);
-    renderer.drawText(UI_12_FONT_ID, width - x - renderer.getTextWidth(UI_12_FONT_ID, count.c_str()), y, count.c_str(),
-                      true, source.unread > 0 ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+  for (const auto& e : events_) {
+    std::string when = e.day == today_ ? "Today" : e.day == today_ + 1 ? "Tomorrow" : feed::dayLabel(e.day);
+    const std::string clock = feed::clockText(e.minute);
+    renderer.drawText(UI_12_FONT_ID, x, y, when.c_str(), true,
+                      e.day == today_ ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    const int titleX = x + 140;
+    std::string line = clock.empty() ? e.title : clock + "  " + e.title;
+    renderer.drawText(UI_12_FONT_ID, titleX, y,
+                      renderer.truncatedText(UI_12_FONT_ID, line.c_str(), width - x - titleX).c_str(), true);
     y += lineHeight;
   }
   y += metrics.verticalSpacing;
-  const int limit = renderer.getScreenHeight() - metrics.buttonHintsHeight - lineHeight;
-  for (const auto& title : headlines_) {
-    if (y > limit) break;
-    renderer.drawText(UI_10_FONT_ID, x, y, renderer.truncatedText(UI_10_FONT_ID, title.c_str(), textWidth).c_str(),
-                      true);
+  rule();
+
+  // ---- feeds: one short line
+  if (!sources_.empty()) {
+    const std::string unread = std::to_string(unreadTotal_) + " unread";
+    renderer.drawText(UI_10_FONT_ID, x, y, "FEEDS", true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, width - x - renderer.getTextWidth(UI_10_FONT_ID, unread.c_str()), y,
+                      unread.c_str(), true);
     y += smallHeight;
+    if (!latestHeadline_.empty()) {
+      renderer.drawText(UI_10_FONT_ID, x, y,
+                        renderer.truncatedText(UI_10_FONT_ID, latestHeadline_.c_str(), textWidth).c_str(), true);
+      y += smallHeight;
+    }
   }
 
   if (withHints) {

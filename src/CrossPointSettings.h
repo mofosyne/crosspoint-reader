@@ -369,6 +369,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Feeds: wake once a day at dailySyncHour (local time), sync, and go back to sleep
   uint8_t dailySync = 0;
   uint8_t dailySyncHour = 5;
+  uint8_t dailySyncCount = 1;  // syncs a day, evenly spaced from dailySyncHour
   uint8_t readerMenuStyle = READER_MENU_LIST;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
