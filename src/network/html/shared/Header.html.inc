@@ -18,6 +18,7 @@
       <a href="/fonts">Fonts</a>
       <a href="/plugins">Plugins</a>
       <a href="/feeds">Feeds</a>
+      <a href="/flashcards">Flashcards</a>
     </nav>
   </div>
   <details class="mobile-nav">
@@ -35,6 +36,7 @@
       <a href="/fonts">Fonts</a>
       <a href="/plugins">Plugins</a>
       <a href="/feeds">Feeds</a>
+      <a href="/flashcards">Flashcards</a>
     </nav>
   </details>
   <script>

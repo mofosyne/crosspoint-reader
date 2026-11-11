@@ -36,18 +36,24 @@ size_t entity(std::string_view s, size_t at, std::string& out) {
   const size_t semi = s.find(';', at);
   if (semi == std::string_view::npos || semi - at > 8) return 0;
   const std::string_view name = s.substr(at, semi - at);
-  if (name == "amp") out += '&';
-  else if (name == "lt") out += '<';
-  else if (name == "gt") out += '>';
-  else if (name == "quot") out += '"';
-  else if (name == "apos") out += '\'';
-  else if (name == "nbsp") out += ' ';
+  if (name == "amp")
+    out += '&';
+  else if (name == "lt")
+    out += '<';
+  else if (name == "gt")
+    out += '>';
+  else if (name == "quot")
+    out += '"';
+  else if (name == "apos")
+    out += '\'';
+  else if (name == "nbsp")
+    out += ' ';
   else if (name.size() > 1 && name[0] == '#') {
     const bool hex = name[1] == 'x' || name[1] == 'X';
     uint32_t cp = 0;
     for (size_t i = hex ? 2 : 1; i < name.size(); ++i) {
       const char c = name[i];
-      const int d = std::isdigit(static_cast<unsigned char>(c)) ? c - '0'
+      const int d = std::isdigit(static_cast<unsigned char>(c))           ? c - '0'
                     : hex && std::isxdigit(static_cast<unsigned char>(c)) ? std::tolower(c) - 'a' + 10
                                                                           : -1;
       if (d < 0) return 0;
@@ -103,6 +109,63 @@ std::string plainField(std::string_view in) {
   return trimmed(std::move(out));
 }
 
+namespace {
+
+bool looksLikeImage(const std::string& s) {
+  const auto ends = [&](const char* ext) {
+    const size_t n = std::string_view(ext).size();
+    if (s.size() <= n) return false;
+    for (size_t i = 0; i < n; ++i) {
+      const char c = s[s.size() - n + i];
+      if ((c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c) != ext[i]) return false;
+    }
+    return s.find(' ') == std::string::npos && s.find('\n') == std::string::npos;
+  };
+  return ends(".bmp") || ends(".png") || ends(".jpg") || ends(".jpeg");
+}
+
+}  // namespace
+
+bool parseCardLine(std::string_view line, Card& out) {
+  if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+  std::vector<std::string> fields;
+  size_t pos = 0;
+  while (true) {
+    const size_t tab = line.find('\t', pos);
+    fields.push_back(plainField(line.substr(pos, tab == std::string_view::npos ? std::string_view::npos : tab - pos)));
+    if (tab == std::string_view::npos) break;
+    pos = tab + 1;
+  }
+  out = Card{};
+  if (fields.size() >= 3 && looksLikeImage(fields.back())) {  // the last field is a picture
+    out.image = std::move(fields.back());
+    fields.pop_back();
+  } else if (fields.size() == 2 && looksLikeImage(fields.back())) {
+    return false;  // a word with only a picture
+  }
+  switch (fields.size()) {
+    case 0:
+    case 1:
+      return false;
+    case 2:
+      out.front = fields[0];
+      out.back = fields[1];
+      break;
+    case 3:
+      out.front = fields[0];
+      out.reading = fields[1];
+      out.back = fields[2];
+      break;
+    default:
+      out.front = fields[0];
+      out.reading = fields[1];
+      out.back = fields[2];
+      out.context = fields[3];
+      break;
+  }
+  return !out.front.empty() && !out.back.empty();
+}
+
 DeckParse parseDeck(std::string_view text) {
   DeckParse deck;
   size_t pos = 0;
@@ -110,29 +173,16 @@ DeckParse parseDeck(std::string_view text) {
   while (pos < text.size()) {
     size_t eol = text.find('\n', pos);
     if (eol == std::string_view::npos) eol = text.size();
-    std::string_view line = text.substr(pos, eol - pos);
+    const std::string_view line = text.substr(pos, eol - pos);
     pos = eol + 1;
     ++lineNo;
-    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-    if (line.empty() || line.front() == '#') continue;
-    const size_t t1 = line.find('\t');
-    if (t1 == std::string_view::npos) {
-      deck.errors.push_back("Line " + std::to_string(lineNo) + ": no tab between front and back");
-      continue;
-    }
-    const size_t t2 = line.find('\t', t1 + 1);
+    if (line.empty() || line.front() == '#' || (line.size() == 1 && line[0] == '\r')) continue;
     Card card;
-    card.front = plainField(line.substr(0, t1));
-    card.back = plainField(line.substr(t1 + 1, t2 == std::string_view::npos ? std::string_view::npos : t2 - t1 - 1));
-    if (t2 != std::string_view::npos) {
-      const size_t t3 = line.find('\t', t2 + 1);  // Anki may add more columns; only tags are kept
-      card.tags = trimmed(std::string(line.substr(t2 + 1, t3 == std::string_view::npos ? std::string_view::npos : t3 - t2 - 1)));
+    if (parseCardLine(line, card)) {
+      deck.cards.push_back(std::move(card));
+    } else {
+      deck.errors.push_back("Line " + std::to_string(lineNo) + ": needs a word and a translation separated by a tab");
     }
-    if (card.front.empty() || card.back.empty()) {
-      deck.errors.push_back("Line " + std::to_string(lineNo) + ": empty front or back");
-      continue;
-    }
-    deck.cards.push_back(std::move(card));
   }
   return deck;
 }
@@ -141,14 +191,23 @@ std::string serializeCard(const Card& card) {
   const auto field = [](const std::string& s) {
     std::string out;
     for (char c : s) {
-      if (c == '\t') out += ' ';
-      else if (c == '\n') out += "<br>";
-      else if (c != '\r') out += c;
+      if (c == '\t')
+        out += ' ';
+      else if (c == '\n')
+        out += "<br>";
+      else if (c != '\r')
+        out += c;
     }
     return out;
   };
-  std::string line = field(card.front) + "\t" + field(card.back);
-  if (!card.tags.empty()) line += "\t" + field(card.tags);
+  std::string line = field(card.front);
+  if (card.reading.empty() && card.context.empty()) {
+    line += "\t" + field(card.back);
+  } else {
+    line += "\t" + field(card.reading) + "\t" + field(card.back);
+    if (!card.context.empty()) line += "\t" + field(card.context);
+  }
+  if (!card.image.empty()) line += "\t" + field(card.image);
   line += '\n';
   return line;
 }

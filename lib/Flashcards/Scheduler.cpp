@@ -29,7 +29,9 @@ CardState applyGrade(CardState s, Grade grade, int32_t today) {
       s.ease = static_cast<uint16_t>(std::max<int>(MIN_EASE, s.ease - 15));
       break;
     case Grade::Good:
-      s.interval = clampInterval(s.reps == 0 ? 1 : s.reps == 1 ? 3 : (s.interval * static_cast<long>(s.ease) + 50) / 100);
+      s.interval = clampInterval(s.reps == 0   ? 1
+                                 : s.reps == 1 ? 3
+                                               : (s.interval * static_cast<long>(s.ease) + 50) / 100);
       break;
     case Grade::Easy:
       s.interval = clampInterval(s.reps == 0 ? 4 : (s.interval * static_cast<long>(s.ease) * 13L + 500) / 1000);
@@ -47,22 +49,26 @@ int daysUntil(const CardState& state, Grade grade, int32_t today) {
 
 bool isDue(const CardState& state, int32_t today) { return state.seen && state.due <= today; }
 
-std::vector<size_t> studyQueue(const std::vector<CardState>& states, int32_t today, size_t newLimit) {
+std::vector<size_t> studyQueue(const CardState* states, size_t count, int32_t today, size_t newLimit, size_t maxQueue) {
   std::vector<size_t> due;
   std::vector<size_t> fresh;
-  for (size_t i = 0; i < states.size(); ++i) {
-    if (isDue(states[i], today)) due.push_back(i);
-    else if (!states[i].seen && fresh.size() < newLimit) fresh.push_back(i);
+  for (size_t i = 0; i < count; ++i) {
+    if (isDue(states[i], today))
+      due.push_back(i);
+    else if (!states[i].seen && fresh.size() < newLimit)
+      fresh.push_back(i);
   }
   std::stable_sort(due.begin(), due.end(), [&](size_t a, size_t b) { return states[a].due < states[b].due; });
   due.insert(due.end(), fresh.begin(), fresh.end());
+  if (due.size() > maxQueue) due.resize(maxQueue);
   return due;
 }
 
-std::string serializeProgress(const std::vector<CardState>& states) {
+std::string serializeProgress(const CardState* states, size_t count) {
   std::string out;
   char line[80];
-  for (const auto& s : states) {
+  for (size_t i = 0; i < count; ++i) {
+    const auto& s = states[i];
     if (!s.seen) continue;
     snprintf(line, sizeof(line), "%08x %d %u %u %u %u\n", static_cast<unsigned>(s.key), static_cast<int>(s.due),
              s.interval, s.ease, s.reps, s.lapses);
@@ -71,7 +77,7 @@ std::string serializeProgress(const std::vector<CardState>& states) {
   return out;
 }
 
-void applyProgress(std::string_view text, std::vector<CardState>& states) {
+void applyProgress(std::string_view text, CardState* states, size_t count) {
   size_t pos = 0;
   while (pos < text.size()) {
     size_t eol = text.find('\n', pos);
@@ -81,7 +87,8 @@ void applyProgress(std::string_view text, std::vector<CardState>& states) {
     unsigned key = 0, interval = 0, ease = 0, reps = 0, lapses = 0;
     int due = 0;
     if (sscanf(line.c_str(), "%x %d %u %u %u %u", &key, &due, &interval, &ease, &reps, &lapses) != 6) continue;
-    for (auto& s : states) {
+    for (size_t i = 0; i < count; ++i) {
+      auto& s = states[i];
       if (s.key != key) continue;
       s.due = due;
       s.interval = static_cast<uint16_t>(interval);

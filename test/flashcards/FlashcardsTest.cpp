@@ -8,14 +8,33 @@ using namespace flashcards;
 TEST(DeckFile, LoadsAnAnkiPlainTextExport) {
   const auto deck = parseDeck(
       "#separator:tab\n#html:true\n#tags column:3\n"
-      "\xE7\x8C\xAB\tcat<br>(neko)\tjp animals\n"
+      "\xE7\x8C\xAB\tcat<br>(neko)\n"
       "\xE6\xB0\xB4\twater &amp; liquid\n");
   ASSERT_EQ(deck.cards.size(), 2u);
   EXPECT_EQ(deck.cards[0].front, "\xE7\x8C\xAB");
   EXPECT_EQ(deck.cards[0].back, "cat\n(neko)");
-  EXPECT_EQ(deck.cards[0].tags, "jp animals");
   EXPECT_EQ(deck.cards[1].back, "water & liquid");
   EXPECT_TRUE(deck.errors.empty());
+}
+
+TEST(DeckFile, ReadsReadingContextAndPicture) {
+  Card c;
+  ASSERT_TRUE(parseCardLine("\xE7\x8C\xAB\t\xE3\x81\xAD\xE3\x81\x93\tcat", c));
+  EXPECT_EQ(c.reading, "\xE3\x81\xAD\xE3\x81\x93");
+  EXPECT_EQ(c.back, "cat");
+  ASSERT_TRUE(parseCardLine("dog\tinu\tdog\tThe dog barks.\tdog.bmp", c));
+  EXPECT_EQ(c.context, "The dog barks.");
+  EXPECT_EQ(c.image, "dog.bmp");
+  ASSERT_TRUE(parseCardLine("apple\tpomme\tapple.BMP", c));  // word, translation, picture
+  EXPECT_EQ(c.reading, "");
+  EXPECT_EQ(c.back, "pomme");
+  EXPECT_EQ(c.image, "apple.BMP");
+  ASSERT_TRUE(parseCardLine("apple\tpomme\tapple\tapple.BMP", c));  // reading, translation, picture
+  EXPECT_EQ(c.reading, "pomme");
+  EXPECT_EQ(c.back, "apple");
+  ASSERT_TRUE(parseCardLine("front\tback\timg.png", c));  // Anki's own Front/Back/picture
+  EXPECT_EQ(c.back, "back");
+  EXPECT_EQ(c.image, "img.png");
 }
 
 TEST(DeckFile, ReportsBadLinesAndKeepsTheRest) {
@@ -31,11 +50,16 @@ TEST(DeckFile, PlainFieldDecodesEntitiesAndTags) {
 }
 
 TEST(DeckFile, SerializedCardsReadBack) {
-  Card c{"word", "line one\nline two\twith tab", "tag"};
-  const auto deck = parseDeck(serializeCard(c));
+  Card c{"word", "", "line one\nline two\twith tab", "", ""};
+  auto deck = parseDeck(serializeCard(c));
   ASSERT_EQ(deck.cards.size(), 1u);
   EXPECT_EQ(deck.cards[0].back, "line one\nline two with tab");
-  EXPECT_EQ(deck.cards[0].tags, "tag");
+  Card full{"neko", "ne-ko", "cat", "A cat sleeps.", "neko.bmp"};
+  deck = parseDeck(serializeCard(full));
+  ASSERT_EQ(deck.cards.size(), 1u);
+  EXPECT_EQ(deck.cards[0].reading, "ne-ko");
+  EXPECT_EQ(deck.cards[0].context, "A cat sleeps.");
+  EXPECT_EQ(deck.cards[0].image, "neko.bmp");
 }
 
 TEST(DeckFile, KeyFollowsTheFrontOnly) {
@@ -77,9 +101,9 @@ TEST(Scheduler, EaseHasAFloorAndEasyIsLonger) {
 
 TEST(Scheduler, QueueHasDueCardsFirstThenALimitedNumberOfNewOnes) {
   std::vector<CardState> states(5);
-  states[1] = applyGrade(CardState{}, Grade::Good, 90);   // due 91
-  states[3] = applyGrade(CardState{}, Grade::Good, 95);   // due 96
-  states[4] = applyGrade(CardState{}, Grade::Good, 99);   // due 100, not yet due on day 98
+  states[1] = applyGrade(CardState{}, Grade::Good, 90);  // due 91
+  states[3] = applyGrade(CardState{}, Grade::Good, 95);  // due 96
+  states[4] = applyGrade(CardState{}, Grade::Good, 99);  // due 100, not yet due on day 98
   const auto queue = studyQueue(states, 98, 1);
   ASSERT_EQ(queue.size(), 3u);
   EXPECT_EQ(queue[0], 1u);

@@ -42,6 +42,7 @@
 #include "FontInstaller.h"
 #if CROSSPOINT_FEEDS
 #include "FeedsWeb.h"
+#include "FlashcardsWeb.h"
 #endif
 #include "OpdsServerStore.h"
 #include "ProtectedPaths.h"
@@ -364,6 +365,11 @@ class CrossPointWebServer::RouteHandler final : public RequestHandler {
         {"/feeds", HTTP_GET, [](S& s) { sendFeedsPage(*s.server); }, nullptr},
         {"/api/feeds/file", HTTP_GET, [](S& s) { handleFeedsFile(*s.server); }, nullptr},
         {"/api/feeds/file", HTTP_POST, [](S& s) { handleFeedsFile(*s.server); }, nullptr},
+        {"/flashcards", HTTP_GET, [](S& s) { sendFlashcardsPage(*s.server); }, nullptr},
+        {"/api/flashcards/decks", HTTP_GET, [](S& s) { handleFlashcardDecks(*s.server); }, nullptr},
+        {"/api/flashcards/deck", HTTP_GET, [](S& s) { handleFlashcardDeck(*s.server); }, nullptr},
+        {"/api/flashcards/deck", HTTP_POST, [](S& s) { handleFlashcardDeck(*s.server); }, nullptr},
+        {"/api/flashcards/card", HTTP_POST, [](S& s) { handleFlashcardCard(*s.server); }, nullptr},
 #endif
 
         {"/api/wifi", HTTP_GET, [](S& s) { s.handleGetWifiNetworks(); }, nullptr},

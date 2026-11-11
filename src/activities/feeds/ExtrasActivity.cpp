@@ -4,12 +4,13 @@
 
 #include "DashboardActivity.h"
 #include "FeedsActivity.h"
+#include "activities/flashcards/FlashcardsActivity.h"
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
 
 namespace {
-const char* const ROWS[] = {"Dashboard", "Feeds"};
+const char* const ROWS[] = {"Dashboard", "Flashcards", "Feeds"};
 }
 
 ExtrasActivity::ExtrasActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -47,7 +48,8 @@ void ExtrasActivity::activateIndex(const int index) {
   app.clearTapFlash();
   std::unique_ptr<Activity> next;
   if (index == 0) next = makeUniqueNoThrow<DashboardActivity>(renderer, mappedInput);
-  if (index == 1) next = makeUniqueNoThrow<FeedsActivity>(renderer, mappedInput);
+  if (index == 1) next = makeUniqueNoThrow<FlashcardsActivity>(renderer, mappedInput);
+  if (index == 2) next = makeUniqueNoThrow<FeedsActivity>(renderer, mappedInput);
   if (next) startActivityForResult(std::move(next), [](const ActivityResult&) {});
 }
 

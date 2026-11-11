@@ -28,11 +28,21 @@ bool isDue(const CardState& state, int32_t today);  // reviewed before and due n
 
 // Cards to study now: due reviews first (most overdue first), then up to `newLimit` unseen cards, in deck order.
 // `states` is parallel to the deck; the result holds indexes into it.
-std::vector<size_t> studyQueue(const std::vector<CardState>& states, int32_t today, size_t newLimit);
+std::vector<size_t> studyQueue(const CardState* states, size_t count, int32_t today, size_t newLimit,
+                               size_t maxQueue = 400);
+inline std::vector<size_t> studyQueue(const std::vector<CardState>& states, int32_t today, size_t newLimit) {
+  return studyQueue(states.data(), states.size(), today, newLimit);
+}
 
 // Progress file text: one line per reviewed card, "<hex key> <due> <interval> <ease> <reps> <lapses>".
-std::string serializeProgress(const std::vector<CardState>& states);
+std::string serializeProgress(const CardState* states, size_t count);
 // Merges saved progress into `states` by key. Cards missing from the deck are dropped.
-void applyProgress(std::string_view text, std::vector<CardState>& states);
+void applyProgress(std::string_view text, CardState* states, size_t count);
+inline std::string serializeProgress(const std::vector<CardState>& states) {
+  return serializeProgress(states.data(), states.size());
+}
+inline void applyProgress(std::string_view text, std::vector<CardState>& states) {
+  applyProgress(text, states.data(), states.size());
+}
 
 }  // namespace flashcards
