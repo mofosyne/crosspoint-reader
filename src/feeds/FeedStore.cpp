@@ -75,6 +75,63 @@ std::vector<CalendarStatus> loadCalendarStatus() {
   return out;
 }
 
+namespace {
+constexpr const char* CLIMATE_PATH = "/feeds/climate.bin";
+constexpr size_t CLIMATE_MAX_RECORDS = 20000;
+}  // namespace
+
+bool logClimate(float tempC, float humidityPct) {
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;  // a reading with no date is no use in a graph
+  feed::ClimateSample sample;
+  sample.when = static_cast<uint32_t>(now);
+  sample.tempTenths = static_cast<int16_t>(tempC * 10.0f + (tempC < 0 ? -0.5f : 0.5f));
+  sample.humidity = static_cast<uint8_t>(humidityPct < 0 ? 0 : humidityPct > 100 ? 100 : humidityPct + 0.5f);
+
+  feed::ClimateSample last;  // the newest record, if there is one
+  {
+    HalFile f;
+    if (Storage.openFileForRead(TAG, CLIMATE_PATH, f)) {
+      const size_t size = f.fileSize();
+      uint8_t bytes[feed::CLIMATE_RECORD_BYTES];
+      if (size >= sizeof(bytes) && f.seek(size - sizeof(bytes)) &&
+          f.read(bytes, sizeof(bytes)) == static_cast<int>(sizeof(bytes))) {
+        last = feed::decodeClimate(bytes);
+      }
+      f.close();
+    }
+  }
+  if (!feed::worthLogging(last, sample)) return false;
+  Storage.ensureDirectoryExists("/feeds");
+  HalFile f = Storage.open(CLIMATE_PATH, O_WRONLY | O_CREAT | O_APPEND);
+  if (!f) return false;
+  uint8_t bytes[feed::CLIMATE_RECORD_BYTES];
+  feed::encodeClimate(sample, bytes);
+  const bool ok = f.write(bytes, sizeof(bytes)) == sizeof(bytes);
+  f.close();
+  return ok;
+}
+
+std::vector<feed::ClimateSample> loadClimate(uint32_t since) {
+  std::vector<feed::ClimateSample> out;
+  HalFile f;
+  if (!Storage.openFileForRead(TAG, CLIMATE_PATH, f)) return out;
+  const size_t size = f.fileSize();
+  const size_t records = size / feed::CLIMATE_RECORD_BYTES;
+  const size_t first = records > CLIMATE_MAX_RECORDS ? records - CLIMATE_MAX_RECORDS : 0;
+  if (!f.seek(first * feed::CLIMATE_RECORD_BYTES)) return out;
+  uint8_t chunk[feed::CLIMATE_RECORD_BYTES * 64];
+  for (int n = f.read(chunk, sizeof(chunk)); n >= static_cast<int>(feed::CLIMATE_RECORD_BYTES);
+       n = f.read(chunk, sizeof(chunk))) {
+    for (size_t at = 0; at + feed::CLIMATE_RECORD_BYTES <= static_cast<size_t>(n); at += feed::CLIMATE_RECORD_BYTES) {
+      const feed::ClimateSample s = feed::decodeClimate(chunk + at);
+      if (s.when >= since) out.push_back(s);
+    }
+  }
+  f.close();
+  return out;
+}
+
 std::string calendarPath(size_t index) { return "/feeds/cal" + std::to_string(index) + ".ics"; }
 
 void loadEvents(feed::EventList& out, bool holidaysOnly) {

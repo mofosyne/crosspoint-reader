@@ -11,6 +11,7 @@ add_executable(FeedReaderTest
   ${REPO_ROOT}/lib/FeedReader/CommentFeed.cpp
   ${REPO_ROOT}/lib/FeedReader/Weather.cpp
   ${REPO_ROOT}/lib/FeedReader/Calendar.cpp
+  ${REPO_ROOT}/lib/FeedReader/ClimateLog.cpp
   ${REPO_ROOT}/lib/FeedReader/DashboardFile.cpp
   ${REPO_ROOT}/freeink-sdk/libs/network/JsonSax/src/StreamingJsonParser.cpp
   ${REPO_ROOT}/lib/expat/xmlparse.c

@@ -135,7 +135,7 @@ const char* outerName(Outer outer) {
     case Outer::Jacket:
       return "Jacket";
     case Outer::LightLayer:
-      return "Light layer";
+      return "Cardigan";
     case Outer::TShirt:
       return "T-shirt";
   }

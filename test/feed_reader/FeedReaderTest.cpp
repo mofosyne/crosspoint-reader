@@ -8,6 +8,7 @@
 
 #include "CachedArticle.h"
 #include "Calendar.h"
+#include "ClimateLog.h"
 #include "CommentFeed.h"
 #include "ContentExtract.h"
 #include "DashboardFile.h"
@@ -679,7 +680,7 @@ TEST(DashboardFile, DefaultsToMelbourne) {
   const auto c = feed::parseDashboard("");
   EXPECT_TRUE(c.weather);
   EXPECT_EQ(c.name, "Melbourne");
-  EXPECT_EQ(c.days, 4);
+  EXPECT_EQ(c.days, 7);
   EXPECT_TRUE(c.errors.empty());
 }
 
@@ -703,7 +704,7 @@ TEST(Weather, AdvisesWhatToWear) {
   feed::WeatherDay cold{"2026-07-01", 3, 4, 11, 60, 1};
   EXPECT_EQ(feed::clothingAdvice(cold), "Coat, umbrella");
   feed::WeatherDay swing{"2026-11-08", 1, 6, 22, 0, 9};
-  EXPECT_EQ(feed::clothingAdvice(swing), "Light layer, layers, sunscreen");
+  EXPECT_EQ(feed::clothingAdvice(swing), "Cardigan, layers, sunscreen");
   feed::WeatherDay hot{"2026-01-08", 0, 20, 33, 5, 11};
   EXPECT_EQ(feed::clothingAdvice(hot), "T-shirt, sunscreen");
   feed::WeatherDay coldMorning{"2026-11-10", 2, 10, 27, 16, 5};
@@ -922,4 +923,36 @@ TEST(Calendar, PruneKeepsFutureAndRepeatingEvents) {
   reader.finish();
   ASSERT_EQ(list.events().size(), 1u);
   EXPECT_EQ(list.events()[0].title, "Soon");
+}
+
+TEST(ClimateLog, RecordsRoundTrip) {
+  feed::ClimateSample s{1794233000u, -37, 64};
+  uint8_t bytes[feed::CLIMATE_RECORD_BYTES];
+  feed::encodeClimate(s, bytes);
+  const auto back = feed::decodeClimate(bytes);
+  EXPECT_EQ(back.when, s.when);
+  EXPECT_EQ(back.tempTenths, -37);
+  EXPECT_EQ(back.humidity, 64);
+}
+
+TEST(ClimateLog, LogsOnlyWhenSomethingMoved) {
+  const feed::ClimateSample last{1000, 220, 50};
+  EXPECT_TRUE(feed::worthLogging({0, 0, 0}, {1000, 220, 50}));        // the very first reading
+  EXPECT_FALSE(feed::worthLogging(last, {1600, 222, 51}));            // barely moved
+  EXPECT_TRUE(feed::worthLogging(last, {1600, 224, 50}));             // 0.4 C
+  EXPECT_TRUE(feed::worthLogging(last, {1600, 220, 53}));             // 3 % humidity
+  EXPECT_TRUE(feed::worthLogging(last, {1000 + 3 * 3600, 220, 50}));  // nothing moved, but an hour log tick
+}
+
+TEST(ClimateLog, BucketsAverageTheReadings) {
+  std::vector<feed::ClimateSample> samples = {{100, 200, 40}, {150, 220, 50}, {400, 100, 60}};
+  const auto b = feed::bucketClimate(samples, 100, 500, 4);  // slices of 100 s
+  ASSERT_EQ(b.size(), 4u);
+  EXPECT_TRUE(b[0].valid);
+  EXPECT_FLOAT_EQ(b[0].tempC, 21.0f);
+  EXPECT_FLOAT_EQ(b[0].humidity, 45.0f);
+  EXPECT_FALSE(b[1].valid);
+  EXPECT_FALSE(b[2].valid);
+  EXPECT_TRUE(b[3].valid);
+  EXPECT_FLOAT_EQ(b[3].tempC, 10.0f);
 }

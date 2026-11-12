@@ -21,7 +21,7 @@ struct DashboardConfig {
   double latitude = -37.81;
   double longitude = 144.96;
   std::string name = "Melbourne";
-  int days = 4;                        // 1 to 7
+  int days = 7;                        // 1 to 7
   std::vector<CalendarRef> calendars;  // iCal feeds, fetched by a sync
   std::vector<std::string> errors;     // lines that could not be understood
 };

@@ -2,6 +2,7 @@
 
 #include <CachedArticle.h>
 #include <Calendar.h>
+#include <ClimateLog.h>
 #include <DashboardFile.h>
 #include <HalMemory.h>
 #include <SeenSet.h>
@@ -43,6 +44,12 @@ struct CalendarStatus {
 };
 void saveCalendarStatus(const std::vector<CalendarStatus>& status);
 std::vector<CalendarStatus> loadCalendarStatus();
+
+// The indoor climate log, /feeds/climate.bin (8 byte records, see ClimateLog.h). A reading is appended only when
+// it has moved enough since the last one (or on a slow heartbeat). Returns true when one was written.
+bool logClimate(float tempC, float humidityPct);
+// Readings from `since` (seconds since 1970) on, oldest first; at most the last 20,000 records are looked at.
+std::vector<feed::ClimateSample> loadClimate(uint32_t since);
 
 // With `holidaysOnly`, only the calendars that filter by region (the public holiday feeds) are read.
 void loadEvents(feed::EventList& out, bool holidaysOnly = false);
