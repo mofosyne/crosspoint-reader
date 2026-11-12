@@ -2,7 +2,7 @@
 
 #include <Memory.h>
 
-#include "DashboardActivity.h"
+#include "DashboardMenuActivity.h"
 #include "FeedsActivity.h"
 #include "activities/flashcards/FlashcardsActivity.h"
 #include "components/UITheme.h"
@@ -47,7 +47,7 @@ void ExtrasActivity::buildScreen(UiScreen& screen) {
 void ExtrasActivity::activateIndex(const int index) {
   app.clearTapFlash();
   std::unique_ptr<Activity> next;
-  if (index == 0) next = makeUniqueNoThrow<DashboardActivity>(renderer, mappedInput);
+  if (index == 0) next = makeUniqueNoThrow<DashboardMenuActivity>(renderer, mappedInput);
   if (index == 1) next = makeUniqueNoThrow<FlashcardsActivity>(renderer, mappedInput);
   if (index == 2) next = makeUniqueNoThrow<FeedsActivity>(renderer, mappedInput);
   if (next) startActivityForResult(std::move(next), [](const ActivityResult&) {});

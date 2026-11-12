@@ -26,11 +26,6 @@ class DashboardActivity final : public Activity {
   static void drawSleepScreen(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
  private:
-  struct SourceLine {
-    std::string name;
-    size_t unread = 0;
-  };
-
   void load();    // reads the stored data; the caller holds the render lock if one is needed
   void reload();  // load() under the render lock
   void drawPage(bool withHints);
@@ -38,9 +33,9 @@ class DashboardActivity final : public Activity {
   feed::DashboardConfig config_;
   feed::Weather weather_;
   int64_t weatherFetched_ = 0;
-  size_t unreadTotal_ = 0;
-  std::vector<SourceLine> sources_;
-  std::string latestHeadline_;       // newest unread title
+  bool indoorOk_ = false;
+  float indoorC_ = 0;
+  int indoorPct_ = 0;
   int32_t today_ = 0;                // local day, days since 1970
   std::vector<feed::Event> events_;  // the next few days
   bool hasHoliday_ = false;

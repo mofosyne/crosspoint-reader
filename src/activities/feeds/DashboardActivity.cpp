@@ -1,5 +1,6 @@
 #include "DashboardActivity.h"
 
+#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Memory.h>
@@ -10,13 +11,16 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "FeedSyncActivity.h"
+#if FREEINK_CAP_TEMP_HUMIDITY
+#include <EnvironmentSensor.h>
+#endif
 #include "MappedInputManager.h"
 #include "WeatherIcons.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
-constexpr size_t MAX_EVENTS = 6;
+constexpr size_t MAX_EVENTS = 9;
 constexpr int EVENT_DAYS = 7;
 constexpr int HOLIDAY_DAYS = 400;
 constexpr time_t CLOCK_SET_AFTER = 1700000000;  // before about 2023 the clock was never set
@@ -43,19 +47,18 @@ void DashboardActivity::load() {
   std::string json;
   if (feeds::loadWeather(json, weatherFetched_)) feed::parseOpenMeteo(json, weather_);
 
-  sources_.clear();
-  feed::SourcesParse parsed;
-  if (feeds::loadSources(parsed)) {
-    for (const auto& source : parsed.sources) sources_.push_back({source.name, feeds::countUnread(source.id)});
+  indoorOk_ = false;
+#if FREEINK_CAP_TEMP_HUMIDITY
+  {
+    EnvironmentSensor sensor;
+    float c = 0, h = 0;
+    if (sensor.begin() && sensor.read(c, h)) {
+      indoorOk_ = true;
+      indoorC_ = c;
+      indoorPct_ = static_cast<int>(h + 0.5f);
+    }
   }
-  unreadTotal_ = 0;
-  for (const auto& source : sources_) unreadTotal_ += source.unread;
-  latestHeadline_.clear();
-  for (const auto& item : feeds::listItems("", 20)) {
-    if (item.read) continue;
-    latestHeadline_ = item.title;
-    break;
-  }
+#endif
 
   events_.clear();
   const time_t now = time(nullptr);
@@ -227,21 +230,12 @@ void DashboardActivity::drawPage(const bool withHints) {
         y += ICON_SIZE + smallHeight + 8;
       }
 
-      {  // the days ahead, side by side
-        const size_t count = std::min<size_t>(weather_.days.size(), 4);
-        const int cell = textWidth / static_cast<int>(count);
-        constexpr int SMALL = 32;
-        for (size_t i = 0; i < count; ++i) {
-          const auto& day = weather_.days[i];
-          const int cx = x + static_cast<int>(i) * cell + cell / 2;
-          centered(UI_10_FONT_ID, cx, y, i == 0 ? "Today" : feed::weekdayName(day.date), EpdFontFamily::BOLD);
-          drawWeatherIcon(renderer, feed::weatherIcon(day.code), cx - SMALL / 2, y + smallHeight, SMALL);
-          centered(
-              UI_10_FONT_ID, cx, y + smallHeight + SMALL + 2,
-              std::to_string(day.minC) + "-" + std::to_string(day.maxC) + "  " + std::to_string(day.rainPercent) + "%",
-              EpdFontFamily::REGULAR);
-        }
-        y += smallHeight * 2 + SMALL + 6;
+      if (indoorOk_) {  // the room: the on-board temperature and humidity sensor
+        char inside[48];
+        snprintf(inside, sizeof(inside), "Inside  %.1f\xC2\xB0   %d%% humidity", static_cast<double>(indoorC_),
+                 indoorPct_);
+        centered(UI_12_FONT_ID, width / 2, y, inside, EpdFontFamily::REGULAR);
+        y += lineHeight + 6;
       }
     }
     y += metrics.verticalSpacing / 2;
@@ -254,9 +248,8 @@ void DashboardActivity::drawPage(const bool withHints) {
     renderer.drawText(UI_12_FONT_ID, x, y, "Nothing in the next 7 days.", true);
     y += lineHeight;
   }
-  // room kept below the events: the holiday line, the calendar note and the feeds block
-  const int feedsRoom = (sources_.empty() ? 0 : smallHeight * 2 + metrics.verticalSpacing * 2) +
-                        (hasHoliday_ ? lineHeight : 0) + (calendarNote_.empty() ? 0 : smallHeight);
+  // room kept below the events: the holiday line and the calendar note
+  const int feedsRoom = (hasHoliday_ ? lineHeight : 0) + (calendarNote_.empty() ? 0 : smallHeight);
   const int limit = renderer.getScreenHeight() - (withHints ? metrics.buttonHintsHeight : 0) - feedsRoom - lineHeight;
   for (const auto& e : events_) {
     if (y > limit) break;  // what does not fit is left out
@@ -293,20 +286,6 @@ void DashboardActivity::drawPage(const bool withHints) {
   }
   y += metrics.verticalSpacing;
   rule();
-
-  // ---- feeds: one short line
-  if (!sources_.empty()) {
-    const std::string unread = std::to_string(unreadTotal_) + " unread";
-    renderer.drawText(UI_10_FONT_ID, x, y, "FEEDS", true, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, width - x - renderer.getTextWidth(UI_10_FONT_ID, unread.c_str()), y,
-                      unread.c_str(), true);
-    y += smallHeight;
-    if (!latestHeadline_.empty()) {
-      renderer.drawText(UI_10_FONT_ID, x, y,
-                        renderer.truncatedText(UI_10_FONT_ID, latestHeadline_.c_str(), textWidth).c_str(), true);
-      y += smallHeight;
-    }
-  }
 
   if (withHints) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Refresh", "", "");
