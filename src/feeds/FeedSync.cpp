@@ -23,10 +23,11 @@ namespace feeds {
 namespace {
 
 constexpr const char* TAG = "FEED";
-constexpr size_t FETCH_CAP = 1536 * 1024;            // a page body beyond this is cut
-constexpr size_t WORK_CAP = 1536 * 1024;             // converted text of one article
-constexpr size_t MIN_FEED_TEXT = 800;                // content=auto: a shorter feed text means "fetch the page"
-constexpr size_t DEFERRED_FEED_TEXT_CAP = 6 * 1024;  // feed text kept while its comments wait to be fetched
+constexpr size_t FETCH_CAP = 1536 * 1024;               // a page body beyond this is cut
+constexpr size_t WORK_CAP = 1536 * 1024;                // converted text of one article
+constexpr size_t MIN_FEED_TEXT = 800;                   // content=auto: a shorter feed text means "fetch the page"
+constexpr unsigned long CALENDAR_DEADLINE_MS = 120000;  // a private feed is big and Google is slow to send it
+constexpr size_t DEFERRED_FEED_TEXT_CAP = 6 * 1024;     // feed text kept while its comments wait to be fetched
 constexpr size_t FEED_SUMMARY_CAP = 40 * 1024;
 constexpr unsigned long HN_DEADLINE_MS = 60000;     // the comment JSON of a busy story is large
 constexpr size_t COMMENT_TEXT_CAP = 4096;           // text kept per comment of a comment feed
@@ -76,6 +77,16 @@ bool tlsHeapOk() {
 
 bool FeedSync::begin(std::string& error) {
   feed::SourcesParse parsed;
+  if (dashboardOnly_) {
+    now_ = nowSeconds();
+    fetchBuf_ = HalMemory::allocatePsram(FETCH_CAP);
+    if (!fetchBuf_) {
+      error = "Not enough PSRAM";
+      return false;
+    }
+    fetchCap_ = FETCH_CAP;
+    return true;  // no sources to read; weatherDone_ stays false, so the first step fetches the dashboard data
+  }
   if (!loadSources(parsed)) {
     error = std::string("No sources file. Put one at ") + SOURCES_PATH;
     return false;
@@ -116,7 +127,7 @@ bool FeedSync::step() {
     if (current_ >= due_.size()) {
       status_.finished = true;
       status_.headline = "Done";
-      if (status_.failed == 0) status_.detail.clear();  // a note about an earlier skipped item is stale now
+      if (status_.failed == 0) status_.detail = dashboardNote_;  // a note about an earlier skipped item is stale now
       return false;
     }
     startSource(current_);
@@ -151,29 +162,73 @@ void FeedSync::fetchDashboardData() {
       }
     }
   }
-  if (config.calendars.empty()) return;
-  status_.headline = "Checking the calendar";
-  // Each feed is saved to its own file; a feed that fails keeps its old file.
-  for (size_t i = 0; i < config.calendars.size(); ++i) {
-    if (!tlsHeapOk()) return;
-    std::string_view body;
-    if (!fetchToBuffer(config.calendars[i].url, body)) continue;
-    if (body.find("BEGIN:VCALENDAR") == std::string_view::npos) {
-      LOG_ERR(TAG, "Not an iCal feed (calendar %u)", static_cast<unsigned>(i));
-      continue;
-    }
-    const std::string path = calendarPath(i);
-    const std::string tmp = path + ".tmp";
-    HalFile out;
-    if (!Storage.openFileForWrite(TAG, tmp, out)) continue;
-    const bool wrote = out.write(body.data(), body.size()) == body.size();
-    out.close();
-    if (wrote && Storage.replaceFile(tmp.c_str(), path.c_str())) {
-      LOG_INF(TAG, "Saved calendar %u (%u bytes)", static_cast<unsigned>(i), static_cast<unsigned>(body.size()));
-    } else {
-      Storage.remove(tmp.c_str());
-    }
+  if (config.calendars.empty()) {
+    saveCalendarStatus({});
+    return;
   }
+  dashboardNote_.clear();
+  status_.headline = "Checking the calendar";
+  // Each feed is saved to its own file; a feed that fails keeps its old file. The result of each is recorded
+  // (without the address, which can hold a private token) for the dashboard and the web page.
+  std::vector<CalendarStatus> results(config.calendars.size());
+  std::string summary;
+  for (size_t i = 0; i < config.calendars.size(); ++i) {
+    CalendarStatus& result = results[i];
+    result.when = now_;
+    const std::string label = "Calendar " + std::to_string(i + 1);
+    if (!tlsHeapOk()) {
+      result.detail = "not enough memory";
+    } else {
+      // Streamed and pruned as it arrives: a private feed holds the calendar's whole history, which is too
+      // big to buffer. Only events from yesterday on, and repeating ones, are kept.
+      const time_t clock = time(nullptr);
+      struct tm local;
+      localtime_r(&clock, &local);
+      const int32_t today =
+          clock > 1700000000 ? feed::daysFromCivil(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday) : 0;
+      const std::string path = calendarPath(i);
+      const std::string tmp = path + ".tmp";
+      HalFile out;
+      if (!Storage.openFileForWrite(TAG, tmp, out)) {
+        result.detail = "could not save";
+      } else {
+        feed::IcsPrune prune(today - 1, [&](const char* data, size_t n) { return out.write(data, n) == n; });
+        const unsigned long start = millis();
+        bool timedOut = false;
+        const bool fetched = HttpDownloader::fetchUrl(config.calendars[i].url, [&](const uint8_t* data, size_t n) {
+          if (millis() - start > CALENDAR_DEADLINE_MS) {
+            timedOut = true;
+            return false;
+          }
+          prune.feed(reinterpret_cast<const char*>(data), n);
+          return !prune.failed();
+        });
+        prune.finish();
+        out.close();
+        const int code = HttpDownloader::lastStatus();
+        if (timedOut) {
+          result.detail = "too slow";
+        } else if (!fetched) {
+          result.detail = code > 0 ? "HTTP " + std::to_string(code) : "no answer";
+        } else if (!prune.sawCalendar()) {
+          result.detail = "not an iCal feed";
+        } else if (prune.failed()) {
+          result.detail = "could not save";
+        } else if (Storage.replaceFile(tmp.c_str(), path.c_str())) {
+          result.ok = true;
+          result.events = static_cast<int>(prune.events());
+          LOG_INF(TAG, "Saved calendar %u (%d events kept)", static_cast<unsigned>(i), result.events);
+        } else {
+          result.detail = "could not save";
+        }
+        if (!result.ok) Storage.remove(tmp.c_str());  // the old copy stays
+      }
+    }
+    summary += (summary.empty() ? "" : "; ") + label +
+               (result.ok ? ": " + std::to_string(result.events) + " events" : " failed (" + result.detail + ")");
+  }
+  saveCalendarStatus(results);
+  status_.detail = dashboardNote_ = summary;  // shown on the sync screen
 }
 
 void FeedSync::startSource(size_t index) {

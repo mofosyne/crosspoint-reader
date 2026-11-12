@@ -63,8 +63,10 @@ A private calendar link is a secret: it is kept on the SD card and nowhere else.
 <button onclick="addHoliday()">Add public holidays</button>
 <div class="small">Holiday feeds are Google's public ones. Give a state or region to see only its holidays; leave it empty for the whole country.</div>
 </fieldset>
-<div><button onclick="save('dashboard')">Save dashboard</button></div>
+<div><button onclick="save('dashboard')">Save dashboard</button><button onclick="loadStatus()">Check calendar sync</button></div>
 <pre id="dashboard-msg"></pre>
+<pre id="cal-status"></pre>
+<p class="small">Calendars are fetched when the dashboard is refreshed (Extras, Dashboard, Refresh) and on each sync.</p>
 
 <h2>Events</h2>
 <p class="small">One per line: <code>2026-11-20 09:00 Dentist</code> (time optional). Use <code>XXXX</code> for the year to repeat every year: <code>XXXX-03-14 Birthday</code>. For a day like "first Tuesday of November" write <code>XXXX-11-TUE1</code> (<code>TUE1</code> to <code>TUE4</code>, or <code>TUEL</code> for the last). Edit freely, then save.</p>
@@ -121,7 +123,8 @@ function addEvent(){
   $('evTitle').value = '';
   $('events-msg').textContent = 'Added below. Press Save events.';
 }
-load('sources'); load('dashboard'); load('events');
+async function loadStatus(){ const r = await fetch('/api/feeds/file?name=status'); $('cal-status').textContent = r.ok ? await r.text() : ''; }
+load('sources'); load('dashboard'); load('events'); loadStatus();
 </script></body></html>
 )HTML";
 
@@ -131,6 +134,31 @@ void sendFeedsPage(WebServer& server) { server.send(200, "text/html", PAGE); }
 
 void handleFeedsFile(WebServer& server) {
   const String name = server.arg("name");
+  if (name == "status") {  // what the last sync did with each calendar
+    const auto config = feeds::loadDashboardConfig();
+    const auto status = feeds::loadCalendarStatus();
+    std::string text;
+    for (size_t i = 0; i < config.calendars.size(); ++i) {
+      const std::string& url = config.calendars[i].url;
+      const size_t start = url.find("//");
+      const size_t end = url.find('/', start == std::string::npos ? 0 : start + 2);
+      text += "Calendar " + std::to_string(i + 1) + " (" +
+              url.substr(start == std::string::npos ? 0 : start + 2,
+                         end == std::string::npos ? std::string::npos : end - start - 2) +
+              "): ";
+      if (i >= status.size() || status[i].when == 0) {
+        text += "not synced yet. Press Refresh on the dashboard, or sync.";
+      } else if (!status[i].ok) {
+        text += "FAILED, " + status[i].detail;
+      } else {
+        text += "synced, " + std::to_string(status[i].events) + " events";
+      }
+      text += "\n";
+    }
+    if (text.empty()) text = "No calendars added.";
+    server.send(200, "text/plain", text.c_str());
+    return;
+  }
   const bool sources = name == "sources";
   const bool events = name == "events";
   if (!sources && !events && name != "dashboard") {

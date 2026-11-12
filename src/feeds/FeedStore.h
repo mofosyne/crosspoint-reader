@@ -33,6 +33,17 @@ bool loadSources(feed::SourcesParse& out);  // false when the file is missing or
 feed::DashboardConfig loadDashboardConfig();
 
 // Adds the events of the hand-written file and of the saved iCal feeds that fall in `out`'s window.
+// What the last sync did with each iCal feed of dashboard.txt (by position), so the dashboard and the web page
+// can say whether it worked. The feed's address is never stored here: it can hold a private token.
+struct CalendarStatus {
+  int64_t when = 0;  // 0 = never synced
+  bool ok = false;
+  int events = 0;
+  std::string detail;  // why it failed, e.g. "HTTP 404"
+};
+void saveCalendarStatus(const std::vector<CalendarStatus>& status);
+std::vector<CalendarStatus> loadCalendarStatus();
+
 // With `holidaysOnly`, only the calendars that filter by region (the public holiday feeds) are read.
 void loadEvents(feed::EventList& out, bool holidaysOnly = false);
 

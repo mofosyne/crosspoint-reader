@@ -43,6 +43,38 @@ feed::DashboardConfig loadDashboardConfig() {
   return feed::parseDashboard(text);
 }
 
+void saveCalendarStatus(const std::vector<CalendarStatus>& status) {
+  std::string text;
+  for (const auto& s : status) {
+    text +=
+        std::to_string(s.when) + "\t" + (s.ok ? "1" : "0") + "\t" + std::to_string(s.events) + "\t" + s.detail + "\n";
+  }
+  Storage.ensureDirectoryExists("/feeds");
+  Storage.writeFile("/feeds/calendars.status", String(text.c_str()));
+}
+
+std::vector<CalendarStatus> loadCalendarStatus() {
+  std::vector<CalendarStatus> out;
+  std::string text;
+  if (!Storage.readFileToString(TAG, "/feeds/calendars.status", 8 * 1024, text)) return out;
+  for (size_t pos = 0; pos < text.size();) {
+    size_t nl = text.find('\n', pos);
+    if (nl == std::string::npos) nl = text.size();
+    const std::string line = text.substr(pos, nl - pos);
+    pos = nl + 1;
+    CalendarStatus s;
+    const size_t t1 = line.find('\t'), t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1),
+                 t3 = t2 == std::string::npos ? t2 : line.find('\t', t2 + 1);
+    if (t3 == std::string::npos) continue;
+    s.when = std::strtoll(line.c_str(), nullptr, 10);
+    s.ok = line[t1 + 1] == '1';
+    s.events = std::atoi(line.c_str() + t2 + 1);
+    s.detail = line.substr(t3 + 1);
+    out.push_back(std::move(s));
+  }
+  return out;
+}
+
 std::string calendarPath(size_t index) { return "/feeds/cal" + std::to_string(index) + ".ics"; }
 
 void loadEvents(feed::EventList& out, bool holidaysOnly) {

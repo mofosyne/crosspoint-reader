@@ -66,6 +66,34 @@ void DashboardActivity::load() {
     feed::EventList list(today_, EVENT_DAYS, MAX_EVENTS);
     feeds::loadEvents(list);
     events_ = list.events();
+    calendarNote_.clear();
+    if (!config_.calendars.empty()) {  // did the last sync get the calendars?
+      const auto status = feeds::loadCalendarStatus();
+      if (status.size() != config_.calendars.size()) {
+        calendarNote_ =
+            status.empty() ? "Calendars not synced yet. Press Refresh." : "Calendars changed. Press Refresh.";
+      } else {
+        int total = 0;
+        int64_t latest = 0;
+        for (size_t i = 0; i < status.size() && calendarNote_.empty(); ++i) {
+          if (!status[i].ok) calendarNote_ = "! Calendar " + std::to_string(i + 1) + ": " + status[i].detail;
+          total += status[i].events;
+          latest = std::max(latest, status[i].when);
+        }
+        if (calendarNote_.empty()) {
+          calendarNote_ = "Calendars synced";
+          if (latest > CLOCK_SET_AFTER) {
+            struct tm at;
+            const time_t stamp = static_cast<time_t>(latest);
+            localtime_r(&stamp, &at);
+            char buf[32];
+            strftime(buf, sizeof(buf), " %a %H:%M", &at);
+            calendarNote_ += buf;
+          }
+          calendarNote_ += ", " + std::to_string(total) + " events";
+        }
+      }
+    }
     feed::EventList holidays(today_, HOLIDAY_DAYS, 1);  // the next public holiday, however far off
     feeds::loadEvents(holidays, /*holidaysOnly=*/true);
     hasHoliday_ = !holidays.events().empty();
@@ -79,7 +107,8 @@ void DashboardActivity::loop() {
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    auto sync = makeUniqueNoThrow<FeedSyncActivity>(renderer, mappedInput, /*checkAll=*/false);
+    auto sync = makeUniqueNoThrow<FeedSyncActivity>(renderer, mappedInput, /*checkAll=*/false, /*scheduled=*/false,
+                                                    /*dashboardOnly=*/true);
     if (sync)
       startActivityForResult(std::move(sync), [this](const ActivityResult&) {
         reload();
@@ -147,7 +176,7 @@ void DashboardActivity::drawPage(const bool withHints) {
   // ---- weather
   if (config_.weather) {
     if (weather_.days.empty()) {
-      renderer.drawText(UI_12_FONT_ID, x, y, "No forecast yet. Press Sync.", true);
+      renderer.drawText(UI_12_FONT_ID, x, y, "No forecast yet. Press Refresh.", true);
       y += lineHeight;
     } else {
       const feed::WeatherDay& today = weather_.days[0];
@@ -207,21 +236,12 @@ void DashboardActivity::drawPage(const bool withHints) {
           const int cx = x + static_cast<int>(i) * cell + cell / 2;
           centered(UI_10_FONT_ID, cx, y, i == 0 ? "Today" : feed::weekdayName(day.date), EpdFontFamily::BOLD);
           drawWeatherIcon(renderer, feed::weatherIcon(day.code), cx - SMALL / 2, y + smallHeight, SMALL);
-          centered(UI_10_FONT_ID, cx, y + smallHeight + SMALL + 2,
-                   std::to_string(day.minC) + "-" + std::to_string(day.maxC) + "\xC2\xB0", EpdFontFamily::REGULAR);
-          centered(UI_10_FONT_ID, cx, y + smallHeight * 2 + SMALL + 2, std::to_string(day.rainPercent) + "% rain",
-                   EpdFontFamily::REGULAR);
+          centered(
+              UI_10_FONT_ID, cx, y + smallHeight + SMALL + 2,
+              std::to_string(day.minC) + "-" + std::to_string(day.maxC) + "  " + std::to_string(day.rainPercent) + "%",
+              EpdFontFamily::REGULAR);
         }
-        y += smallHeight * 3 + SMALL + 6;
-      }
-      if (weatherFetched_ > CLOCK_SET_AFTER) {
-        struct tm local;
-        const time_t fetched = static_cast<time_t>(weatherFetched_);
-        localtime_r(&fetched, &local);
-        char stamp[32];
-        strftime(stamp, sizeof(stamp), "Updated %a %H:%M", &local);
-        renderer.drawText(UI_10_FONT_ID, x, y, stamp, true);
-        y += smallHeight;
+        y += smallHeight * 2 + SMALL + 6;
       }
     }
     y += metrics.verticalSpacing / 2;
@@ -234,7 +254,9 @@ void DashboardActivity::drawPage(const bool withHints) {
     renderer.drawText(UI_12_FONT_ID, x, y, "Nothing in the next 7 days.", true);
     y += lineHeight;
   }
-  const int feedsRoom = sources_.empty() ? 0 : smallHeight * 2 + metrics.verticalSpacing * 2;
+  // room kept below the events: the holiday line, the calendar note and the feeds block
+  const int feedsRoom = (sources_.empty() ? 0 : smallHeight * 2 + metrics.verticalSpacing * 2) +
+                        (hasHoliday_ ? lineHeight : 0) + (calendarNote_.empty() ? 0 : smallHeight);
   const int limit = renderer.getScreenHeight() - (withHints ? metrics.buttonHintsHeight : 0) - feedsRoom - lineHeight;
   for (const auto& e : events_) {
     if (y > limit) break;  // what does not fit is left out
@@ -263,6 +285,12 @@ void DashboardActivity::drawPage(const bool withHints) {
                       renderer.truncatedText(UI_12_FONT_ID, text.c_str(), width - x - titleX).c_str(), true);
     y += lineHeight;
   }
+  if (!calendarNote_.empty()) {
+    renderer.drawText(UI_10_FONT_ID, x, y,
+                      renderer.truncatedText(UI_10_FONT_ID, calendarNote_.c_str(), textWidth).c_str(), true,
+                      calendarNote_[0] == '!' ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    y += smallHeight;
+  }
   y += metrics.verticalSpacing;
   rule();
 
@@ -281,7 +309,7 @@ void DashboardActivity::drawPage(const bool withHints) {
   }
 
   if (withHints) {
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Sync", "", "");
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Refresh", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 }

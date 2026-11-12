@@ -891,3 +891,35 @@ TEST(Calendar, YearPlaceholderAndFloatingHolidays) {
   EXPECT_EQ(find("King's Birthday"), feed::daysFromCivil(2027, 6, 14));    // the second Monday
   EXPECT_EQ(find("Last Sunday"), feed::daysFromCivil(2027, 5, 30));
 }
+
+TEST(Calendar, PruneKeepsFutureAndRepeatingEvents) {
+  const std::string ics =
+      "BEGIN:VCALENDAR\r\nPRODID:x\r\nBEGIN:VTIMEZONE\r\nTZID:Y\r\nEND:VTIMEZONE\r\n"
+      "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20200101\r\nSUMMARY:Old\r\nEND:VEVENT\r\n"
+      "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261115\r\nSUMMARY:Soon\r\nEND:VEVENT\r\n"
+      "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20150311\r\nSUMMARY:Birthday\r\nRRULE:FREQ=YEARLY\r\nEND:VEVENT\r\n"
+      "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20190101\r\nSUMMARY:Ended\r\nRRULE:FREQ=WEEKLY;UNTIL=20200101\r\nEND:"
+      "VEVENT\r\n"
+      "END:VCALENDAR\r\n";
+  std::string out;
+  feed::IcsPrune prune(feed::daysFromCivil(2026, 11, 10), [&](const char* d, size_t n) {
+    out.append(d, n);
+    return true;
+  });
+  for (size_t i = 0; i < ics.size(); i += 11) prune.feed(ics.data() + i, std::min<size_t>(11, ics.size() - i));
+  prune.finish();
+  EXPECT_TRUE(prune.sawCalendar());
+  EXPECT_EQ(prune.events(), 2u);
+  EXPECT_NE(out.find("Soon"), std::string::npos);
+  EXPECT_NE(out.find("Birthday"), std::string::npos);
+  EXPECT_EQ(out.find("Old"), std::string::npos);
+  EXPECT_EQ(out.find("Ended"), std::string::npos);
+  EXPECT_EQ(out.find("VTIMEZONE"), std::string::npos);
+  // what comes out reads back as an iCalendar
+  feed::EventList list(feed::daysFromCivil(2026, 11, 10), 10, 10);
+  feed::IcsReader reader(list, 0);
+  reader.feed(out.data(), out.size());
+  reader.finish();
+  ASSERT_EQ(list.events().size(), 1u);
+  EXPECT_EQ(list.events()[0].title, "Soon");
+}

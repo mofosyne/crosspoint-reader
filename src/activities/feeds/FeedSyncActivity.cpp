@@ -20,8 +20,11 @@ constexpr int MIN_SCHEDULED_BATTERY_PERCENT = 20;
 }
 
 FeedSyncActivity::FeedSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool checkAll,
-                                   bool scheduled)
-    : Activity("FeedSync", renderer, mappedInput), checkAll_(checkAll), scheduled_(scheduled) {}
+                                   bool scheduled, bool dashboardOnly)
+    : Activity("FeedSync", renderer, mappedInput),
+      checkAll_(checkAll),
+      scheduled_(scheduled),
+      dashboardOnly_(dashboardOnly) {}
 
 bool FeedSyncActivity::wifiUp() const {
   return WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
@@ -58,6 +61,7 @@ void FeedSyncActivity::onEnter() {
 
 void FeedSyncActivity::startSync() {
   sync_ = makeUniqueNoThrow<feeds::FeedSync>(checkAll_);
+  if (sync_ && dashboardOnly_) sync_->dashboardOnly();
   if (!sync_ || !sync_->begin(error_)) {
     state_ = State::Error;
     if (error_.empty()) error_ = "Not enough memory";
@@ -123,8 +127,10 @@ void FeedSyncActivity::render(RenderLock&&) {
     case State::Running:
     case State::Done:
       line(shown_.headline, EpdFontFamily::BOLD);
-      line("Sources: " + std::to_string(shown_.sourcesDone) + "/" + std::to_string(shown_.sourcesTotal));
-      line("Saved: " + std::to_string(shown_.saved) + "   Failed: " + std::to_string(shown_.failed));
+      if (!dashboardOnly_) {
+        line("Sources: " + std::to_string(shown_.sourcesDone) + "/" + std::to_string(shown_.sourcesTotal));
+        line("Saved: " + std::to_string(shown_.saved) + "   Failed: " + std::to_string(shown_.failed));
+      }
       line(shown_.detail);
       break;
   }

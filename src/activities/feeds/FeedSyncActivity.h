@@ -12,7 +12,9 @@
 class FeedSyncActivity final : public Activity {
  public:
   // `scheduled`: started by the daily timer wake. It draws little, and sleeps the device when it ends.
-  FeedSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool checkAll, bool scheduled = false);
+  // `dashboardOnly`: refresh just the weather and the calendars (quick), not the feed sources.
+  FeedSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool checkAll, bool scheduled = false,
+                   bool dashboardOnly = false);
 
   void onEnter() override;
   void onExit() override;
@@ -30,6 +32,7 @@ class FeedSyncActivity final : public Activity {
 
   const bool checkAll_;
   const bool scheduled_;
+  const bool dashboardOnly_;
   State state_ = State::Connecting;
   std::string error_;
   std::unique_ptr<feeds::FeedSync> sync_;

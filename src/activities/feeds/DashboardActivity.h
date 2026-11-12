@@ -44,5 +44,6 @@ class DashboardActivity final : public Activity {
   int32_t today_ = 0;                // local day, days since 1970
   std::vector<feed::Event> events_;  // the next few days
   bool hasHoliday_ = false;
-  feed::Event holiday_;  // the next public holiday
+  std::string calendarNote_;  // when the calendars last synced, or what went wrong
+  feed::Event holiday_;       // the next public holiday
 };

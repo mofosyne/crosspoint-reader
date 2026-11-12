@@ -285,6 +285,88 @@ void IcsReader::endEvent() {
   }
 }
 
+// ---- pruning ----------------------------------------------------------------------------------
+
+namespace {
+constexpr size_t MAX_EVENT_BLOCK = 8192;  // a longer event (huge description) is dropped
+}
+
+void IcsPrune::write(std::string_view text) {
+  if (!failed_ && !sink_(text.data(), text.size())) failed_ = true;
+}
+
+void IcsPrune::feed(const char* data, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    const char c = data[i];
+    if (c == '\n') {
+      if (!physical_.empty() && physical_.back() == '\r') physical_.pop_back();
+      line(physical_);
+      physical_.clear();
+    } else if (physical_.size() < 4096) {
+      physical_ += c;
+    }
+  }
+}
+
+void IcsPrune::finish() {
+  if (!physical_.empty()) line(physical_);
+  physical_.clear();
+  if (started_) write("END:VCALENDAR\r\n");
+}
+
+void IcsPrune::line(std::string_view text) {
+  if (text == "BEGIN:VCALENDAR") {
+    sawCalendar_ = true;
+    if (!started_) {
+      started_ = true;
+      write("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+    }
+    return;
+  }
+  if (text == "BEGIN:VEVENT") {
+    inEvent_ = true;
+    tooBig_ = hasStart_ = repeats_ = hasUntil_ = false;
+    block_.assign("BEGIN:VEVENT\r\n");
+    return;
+  }
+  if (!inEvent_) return;
+  if (text == "END:VEVENT") {
+    inEvent_ = false;
+    const bool keep =
+        !tooBig_ && hasStart_ && (repeats_ ? (!hasUntil_ || untilDay_ >= keepFrom_) : startDay_ >= keepFrom_);
+    if (keep) {
+      block_ += "END:VEVENT\r\n";
+      write(block_);
+      ++events_;
+    }
+    block_.clear();
+    return;
+  }
+  if (block_.size() + text.size() + 2 > MAX_EVENT_BLOCK) {
+    tooBig_ = true;
+    return;
+  }
+  block_.append(text);
+  block_ += "\r\n";
+  const size_t colon = text.find(':');
+  if (colon == std::string_view::npos) return;
+  const std::string_view name = text.substr(0, std::min(colon, text.find(';')));
+  const std::string_view value = text.substr(colon + 1);
+  if (name == "DTSTART") {
+    int minute;
+    bool allDay;
+    hasStart_ = parseStamp(value, 0, startDay_, minute, allDay);
+  } else if (name == "RRULE") {
+    repeats_ = true;
+    const size_t until = value.find("UNTIL=");
+    if (until != std::string_view::npos) {
+      int minute;
+      bool allDay;
+      hasUntil_ = parseStamp(value.substr(until + 6, 16), 0, untilDay_, minute, allDay);
+    }
+  }
+}
+
 // ---- manual events ---------------------------------------------------------------------------
 
 void parseManualEvents(std::string_view text, EventList& out, std::vector<std::string>* errors) {

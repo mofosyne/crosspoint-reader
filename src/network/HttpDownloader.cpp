@@ -10,6 +10,19 @@
 
 #include "WifiPowerSaveGuard.h"
 
+namespace {
+// An address for the log with anything secret cut off: private calendar links and tokens in a query carry the
+// credential in the address itself.
+std::string safeUrl(const std::string& url) {
+  size_t cut = std::string::npos;
+  for (const char* marker : {"private-", "token=", "key=", "secret", "password=", "auth="}) {
+    const size_t at = url.find(marker);
+    if (at != std::string::npos && at < cut) cut = at;
+  }
+  return cut == std::string::npos ? url : url.substr(0, cut) + "[hidden]";
+}
+}  // namespace
+
 extern "C" void wolfSSL_Arduino_Serial_Print(const char* const msg) { LOG_DBG("WOLFSSL", "%s", msg); }
 
 namespace {
@@ -62,7 +75,7 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
           if (!username.empty() && !password.empty()) http.setBasicAuth(username, password);
           for (const auto& h : headers) http.addHeader(h.first, h.second);
         }
-        LOG_DBG("HTTP", "wolfSSL GET: %s (heap %u, max block %u)", url.c_str(), (unsigned)ESP.getFreeHeap(),
+        LOG_DBG("HTTP", "wolfSSL GET: %s (heap %u, max block %u)", safeUrl(url).c_str(), (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
       },
       sink, [cancelFlag] { return cancelFlag && *cancelFlag; });
@@ -74,11 +87,11 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   if (result.aborted) return HttpDownloader::ABORTED;
   if (result.stopped) return HttpDownloader::FILE_ERROR;
   if (result.status == 401 || result.status == 403) {
-    LOG_ERR("HTTP", "wolfSSL request unauthorized: status %d: %s", result.status, url.c_str());
+    LOG_ERR("HTTP", "wolfSSL request unauthorized: status %d: %s", result.status, safeUrl(url).c_str());
     return HttpDownloader::UNAUTHORIZED;
   }
   if (result.status < 200 || result.status >= 300) {
-    LOG_ERR("HTTP", "wolfSSL request failed: status %d: %s", result.status, url.c_str());
+    LOG_ERR("HTTP", "wolfSSL request failed: status %d: %s", result.status, safeUrl(url).c_str());
     return HttpDownloader::HTTP_ERROR;
   }
   if (!result.complete) {
@@ -103,7 +116,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const 
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,
                               const std::string& password, const std::vector<Header>& headers) {
-  LOG_DBG("HTTP", "Fetching: %s", url.c_str());
+  LOG_DBG("HTTP", "Fetching: %s", safeUrl(url).c_str());
   freeink::FetchSink sink;
   sink.write = onData;
   return runGetSecure(url, username, password, headers, sink) == OK;
@@ -122,7 +135,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
     freeink::SecureHttpClient http;
     if (!http.begin(current)) {
-      LOG_ERR("HTTP", "bad URL: %s", current.c_str());
+      LOG_ERR("HTTP", "bad URL: %s", safeUrl(current).c_str());
       status = 0;
       break;
     }
@@ -140,7 +153,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
     if (!options.accept.empty()) http.addHeader("Accept", options.accept);
     if (!options.acceptLanguage.empty()) http.addHeader("Accept-Language", options.acceptLanguage);
 
-    LOG_DBG("HTTP", "wolfSSL GET: %s", current.c_str());
+    LOG_DBG("HTTP", "wolfSSL GET: %s", safeUrl(current).c_str());
     status = http.GET([&](const uint8_t* data, size_t len) {
       const int st = http.getStatus();
       const bool wanted = (st >= 200 && st < 300) || (options.captureErrorBody && st == 401);
@@ -170,13 +183,13 @@ bool HttpDownloader::postForm(const std::string& url, const std::string& formBod
   outResponse.clear();
   freeink::SecureHttpClient http;
   if (!http.begin(url)) {
-    LOG_ERR("HTTP", "bad URL: %s", url.c_str());
+    LOG_ERR("HTTP", "bad URL: %s", safeUrl(url).c_str());
     if (statusOut) *statusOut = 0;
     return false;
   }
   applyCommonClientSetup(http);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  LOG_DBG("HTTP", "wolfSSL POST: %s", url.c_str());
+  LOG_DBG("HTTP", "wolfSSL POST: %s", safeUrl(url).c_str());
   const int status = http.sendRequest("POST", reinterpret_cast<const uint8_t*>(formBody.data()), formBody.size(),
                                       [&outResponse](const uint8_t* data, size_t len) {
                                         const size_t room =
@@ -191,7 +204,7 @@ bool HttpDownloader::postForm(const std::string& url, const std::string& formBod
 HttpDownloader::DownloadError HttpDownloader::postToFile(const std::string& url, const std::string& body,
                                                          const std::string& contentType, const std::string& destPath,
                                                          ProgressCallback progress, const bool* cancelFlag) {
-  LOG_DBG("HTTP", "POST download: %s -> %s", url.c_str(), destPath.c_str());
+  LOG_DBG("HTTP", "POST download: %s -> %s", safeUrl(url).c_str(), destPath.c_str());
   WifiPowerSaveGuard psGuard;
 
   const std::string partPath = destPath + ".part";
@@ -204,7 +217,7 @@ HttpDownloader::DownloadError HttpDownloader::postToFile(const std::string& url,
 
   freeink::SecureHttpClient http;
   if (!http.begin(url)) {
-    LOG_ERR("HTTP", "bad URL: %s", url.c_str());
+    LOG_ERR("HTTP", "bad URL: %s", safeUrl(url).c_str());
     return HTTP_ERROR;
   }
   applyCommonClientSetup(http);
@@ -236,7 +249,7 @@ HttpDownloader::DownloadError HttpDownloader::postToFile(const std::string& url,
   } else if (writeFailed) {
     result = FILE_ERROR;
   } else if (status < 200 || status >= 300) {
-    LOG_ERR("HTTP", "POST failed: status %d: %s", status, url.c_str());
+    LOG_ERR("HTTP", "POST failed: status %d: %s", status, safeUrl(url).c_str());
     result = HTTP_ERROR;
   } else if (downloaded == 0) {
     LOG_ERR("HTTP", "no data received");
@@ -263,7 +276,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                                              const std::string& username, const std::string& password,
                                                              const std::vector<Header>& headers,
                                                              bool downgradeRedirectsToHttp) {
-  LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
+  LOG_DBG("HTTP", "Downloading: %s -> %s", safeUrl(url).c_str(), destPath.c_str());
 
   // Stage in <dest>.part: a failed or cancelled download never replaces an
   // existing copy, and a partial file never sits under the real name.

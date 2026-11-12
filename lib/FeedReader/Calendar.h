@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -71,6 +72,40 @@ class IcsReader {
   bool hasUntil_ = false;
   int32_t untilDay_ = 0;
   std::vector<int32_t> exdates_;
+};
+
+// Copies an iCalendar stream down to what the dashboard can use, a piece at a time: the events that start on or
+// after `keepFromDay`, and the repeating ones that have not ended. A calendar's whole history is dropped, so a big
+// private feed fits on the card. Everything else (time zone blocks, alarms outside events) is left out.
+class IcsPrune {
+ public:
+  using Sink = std::function<bool(const char* data, size_t len)>;
+  IcsPrune(int32_t keepFromDay, Sink sink) : keepFrom_(keepFromDay), sink_(std::move(sink)) {}
+  void feed(const char* data, size_t len);
+  void finish();
+  size_t events() const { return events_; }          // events written
+  bool sawCalendar() const { return sawCalendar_; }  // the stream really was an iCalendar
+  bool failed() const { return failed_; }            // the sink refused data
+
+ private:
+  void line(std::string_view text);
+  void write(std::string_view text);
+
+  int32_t keepFrom_;
+  Sink sink_;
+  std::string physical_;
+  std::string block_;
+  bool inEvent_ = false;
+  bool tooBig_ = false;
+  bool started_ = false;
+  bool sawCalendar_ = false;
+  bool failed_ = false;
+  bool hasStart_ = false;
+  int32_t startDay_ = 0;
+  bool repeats_ = false;
+  bool hasUntil_ = false;
+  int32_t untilDay_ = 0;
+  size_t events_ = 0;
 };
 
 // Reads the hand-written events file, one per line ('#' starts a comment):

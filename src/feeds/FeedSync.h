@@ -28,6 +28,8 @@ class FeedSync {
   };
 
   explicit FeedSync(bool checkAll) : checkAll_(checkAll) {}
+  // Only the dashboard's weather and calendars, not the feed sources (call before begin()).
+  void dashboardOnly() { dashboardOnly_ = true; }
 
   // Reads the sources file and picks the sources that are due (all, with checkAll). False with
   // `error` set when there is nothing to do.
@@ -62,6 +64,8 @@ class FeedSync {
   void fetchDashboardData();
 
   bool checkAll_;
+  bool dashboardOnly_ = false;
+  std::string dashboardNote_;  // what the weather and calendars did, kept for the end of the run
   Status status_;
   std::vector<feed::Source> due_;
   size_t current_ = 0;
