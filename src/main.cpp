@@ -483,6 +483,7 @@ static bool holdSleepWhileUsbPowered() {
 
 static volatile bool sleepRequested = false;
 static bool scheduledWake = false;     // this boot came from the daily sync timer
+static int pageWake = 0;               // a page button woke the dashboard: +1 next, -1 previous
 static bool debugWakeRedraw = false;   // SLEEPTIMER:<s>R wakes for a redraw only
 static uint32_t debugWakeSeconds = 0;  // SLEEPTIMER: debug override of the next wake delay
 void requestDeepSleep() { sleepRequested = true; }
@@ -616,7 +617,15 @@ void enterDeepSleep(bool fromTimeout = false) {
   }
 #endif
 
-  powerManager.startDeepSleep(gpio, wakeOnHeldButton);
+  uint64_t extraWake = 0;
+#if CROSSPOINT_FEEDS
+  if (dashboardSleep) {  // the page buttons flip the dashboard while the device sleeps
+    const auto& in = BoardConfig::ACTIVE.input;
+    if (in.up >= 0) extraWake |= 1ULL << in.up;
+    if (in.down >= 0) extraWake |= 1ULL << in.down;
+  }
+#endif
+  powerManager.startDeepSleep(gpio, wakeOnHeldButton, extraWake);
 }
 
 void setupDisplayAndFonts(bool seamless = false) {
@@ -661,6 +670,9 @@ void setupDisplayAndFonts(bool seamless = false) {
 }
 
 void setup() {
+  // Which pins woke it from deep sleep. Read once and first: reading the status clears it, and the start-up code
+  // below also wants it.
+  const uint64_t wakeExt1Pins = esp_sleep_get_ext1_wakeup_status();
   BoardConfig::holdPowerRails();
 
 #ifdef ENABLE_SERIAL_LOG
@@ -705,6 +717,19 @@ void setup() {
   }
 
   const auto wakeupReason = gpio.getWakeupReason();
+  LOG_INF("MAIN", "Wake: cause %d, ext1 pins 0x%llx", static_cast<int>(esp_sleep_get_wakeup_cause()),
+          static_cast<unsigned long long>(wakeExt1Pins));
+#if CROSSPOINT_FEEDS
+  // A page button (not the power button) woke the dashboard: +1 for the down button, -1 for the up button.
+  // (Not named bit: Arduino defines a macro of that name.)
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
+    const uint64_t woke = wakeExt1Pins;
+    const auto& in = BoardConfig::ACTIVE.input;
+    const auto pinWoke = [&](int pin) { return pin >= 0 && ((woke >> pin) & 1) != 0; };
+    if (!pinWoke(in.power)) pageWake = pinWoke(in.down) ? 1 : pinWoke(in.up) ? -1 : 0;
+    LOG_INF("MAIN", "Page wake %d (pins: power %d up %d down %d)", pageWake, in.power, in.up, in.down);
+  }
+#endif
   // Sample the wake hold now — a click wake is released within milliseconds of
   // boot — but defer the sleep-or-boot decision until SETTINGS is loaded below:
   // click-to-wake is a setting, and an X4 battery power-off cuts all power, so
@@ -746,7 +771,8 @@ void setup() {
 
   APP_STATE.loadFromFile();
   scheduledWake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
-  const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton || scheduledWake;
+  if (scheduledWake) APP_STATE.dashboardPage = 0;  // the midnight and sync wakes show the main page again
+  const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton || scheduledWake || pageWake != 0;
   const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
 
   if (recoveryFirmwareMode) {
@@ -815,7 +841,8 @@ void setup() {
       // With Short Power Button Press = Sleep, a single click wakes on any
       // device; otherwise the button must still be held (ghost-wake debounce).
       // Picco: plugging in USB pulses the wake line; power on, as stock does.
-      if (!skipHoldCheck && !wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP &&
+      if (pageWake == 0 && !skipHoldCheck && !wakeHoldVerified &&
+          SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP &&
           !(FREEINK_DEVICE_PICCO && gpio.isUsbConnected())) {
         LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
         Storage.prepareForDeepSleep();
@@ -907,6 +934,10 @@ void setup() {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
 #if CROSSPOINT_FEEDS
+  } else if (pageWake != 0) {  // change the page and go back to sleep; the sleep screen draws it
+    LOG_INF("MAIN", "Dashboard page %d, step %d", APP_STATE.dashboardPage, pageWake);
+    APP_STATE.dashboardPage = DashboardActivity::pageAfter(APP_STATE.dashboardPage, pageWake);
+    activityManager.replaceActivity(std::make_unique<ScheduledRedrawActivity>(renderer, mappedInputManager));
   } else if (scheduledWake && APP_STATE.pendingSync) {
     activityManager.replaceActivity(std::make_unique<FeedSyncActivity>(renderer, mappedInputManager,
                                                                        /*checkAll=*/false, /*scheduled=*/true));
@@ -1019,6 +1050,11 @@ static void sendDebugText(const char* tag, const std::string& text) {
 #endif
 
 static void handleCommand(const String& cmd) {
+  if (cmd == "PAGENEXT" || cmd == "PAGEPREV") {  // the page-button wake, without the button: flip the page and sleep
+    APP_STATE.dashboardPage = DashboardActivity::pageAfter(APP_STATE.dashboardPage, cmd == "PAGENEXT" ? 1 : -1);
+    enterDeepSleep(false);
+    return;
+  }
   if (cmd.startsWith("SLEEPTIMER:")) {  // sleep, and wake by the timer after N seconds (tests the daily sync)
     debugWakeSeconds = static_cast<uint32_t>(cmd.substring(11).toInt());
     debugWakeRedraw = cmd.endsWith("R");

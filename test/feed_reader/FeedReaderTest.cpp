@@ -926,33 +926,39 @@ TEST(Calendar, PruneKeepsFutureAndRepeatingEvents) {
 }
 
 TEST(ClimateLog, RecordsRoundTrip) {
-  feed::ClimateSample s{1794233000u, -37, 64};
+  feed::ClimateSample s{1794233000u, -37, 64, 87};
   uint8_t bytes[feed::CLIMATE_RECORD_BYTES];
   feed::encodeClimate(s, bytes);
   const auto back = feed::decodeClimate(bytes);
   EXPECT_EQ(back.when, s.when);
   EXPECT_EQ(back.tempTenths, -37);
   EXPECT_EQ(back.humidity, 64);
+  EXPECT_EQ(back.battery, 87);
 }
 
 TEST(ClimateLog, LogsOnlyWhenSomethingMoved) {
-  const feed::ClimateSample last{1000, 220, 50};
-  EXPECT_TRUE(feed::worthLogging({0, 0, 0}, {1000, 220, 50}));        // the very first reading
-  EXPECT_FALSE(feed::worthLogging(last, {1600, 222, 51}));            // barely moved
-  EXPECT_TRUE(feed::worthLogging(last, {1600, 224, 50}));             // 0.4 C
-  EXPECT_TRUE(feed::worthLogging(last, {1600, 220, 53}));             // 3 % humidity
-  EXPECT_TRUE(feed::worthLogging(last, {1000 + 3 * 3600, 220, 50}));  // nothing moved, but an hour log tick
+  const feed::ClimateSample last{1000, 220, 50, 80};
+  EXPECT_TRUE(feed::worthLogging({0, 0, 0, 0}, {1000, 220, 50, 80}));     // the very first reading
+  EXPECT_FALSE(feed::worthLogging(last, {1600, 222, 51, 79}));            // barely moved
+  EXPECT_TRUE(feed::worthLogging(last, {1600, 224, 50, 80}));             // 0.4 C
+  EXPECT_TRUE(feed::worthLogging(last, {1600, 220, 53, 80}));             // 3 % humidity
+  EXPECT_TRUE(feed::worthLogging(last, {1600, 220, 50, 77}));             // the battery dropped 3 points
+  EXPECT_FALSE(feed::worthLogging(last, {1600, 220, 50, 0}));             // battery not recorded: no reason to log
+  EXPECT_TRUE(feed::worthLogging(last, {1000 + 3 * 3600, 220, 50, 80}));  // nothing moved, but a log tick
 }
 
 TEST(ClimateLog, BucketsAverageTheReadings) {
-  std::vector<feed::ClimateSample> samples = {{100, 200, 40}, {150, 220, 50}, {400, 100, 60}};
+  std::vector<feed::ClimateSample> samples = {{100, 200, 40, 90}, {150, 220, 50, 80}, {400, 100, 60, 0}};
   const auto b = feed::bucketClimate(samples, 100, 500, 4);  // slices of 100 s
   ASSERT_EQ(b.size(), 4u);
   EXPECT_TRUE(b[0].valid);
   EXPECT_FLOAT_EQ(b[0].tempC, 21.0f);
   EXPECT_FLOAT_EQ(b[0].humidity, 45.0f);
+  EXPECT_TRUE(b[0].hasBattery);
+  EXPECT_FLOAT_EQ(b[0].battery, 85.0f);
   EXPECT_FALSE(b[1].valid);
   EXPECT_FALSE(b[2].valid);
   EXPECT_TRUE(b[3].valid);
   EXPECT_FLOAT_EQ(b[3].tempC, 10.0f);
+  EXPECT_FALSE(b[3].hasBattery);
 }

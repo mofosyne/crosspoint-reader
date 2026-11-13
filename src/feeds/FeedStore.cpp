@@ -80,13 +80,14 @@ constexpr const char* CLIMATE_PATH = "/feeds/climate.bin";
 constexpr size_t CLIMATE_MAX_RECORDS = 20000;
 }  // namespace
 
-bool logClimate(float tempC, float humidityPct) {
+bool logClimate(float tempC, float humidityPct, uint8_t batteryPct) {
   const time_t now = time(nullptr);
   if (now < 1700000000) return false;  // a reading with no date is no use in a graph
   feed::ClimateSample sample;
   sample.when = static_cast<uint32_t>(now);
   sample.tempTenths = static_cast<int16_t>(tempC * 10.0f + (tempC < 0 ? -0.5f : 0.5f));
   sample.humidity = static_cast<uint8_t>(humidityPct < 0 ? 0 : humidityPct > 100 ? 100 : humidityPct + 0.5f);
+  sample.battery = batteryPct > 100 ? 100 : batteryPct;
 
   feed::ClimateSample last;  // the newest record, if there is one
   {

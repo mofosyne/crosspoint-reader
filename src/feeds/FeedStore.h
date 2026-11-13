@@ -47,7 +47,7 @@ std::vector<CalendarStatus> loadCalendarStatus();
 
 // The indoor climate log, /feeds/climate.bin (8 byte records, see ClimateLog.h). A reading is appended only when
 // it has moved enough since the last one (or on a slow heartbeat). Returns true when one was written.
-bool logClimate(float tempC, float humidityPct);
+bool logClimate(float tempC, float humidityPct, uint8_t batteryPct);
 // Readings from `since` (seconds since 1970) on, oldest first; at most the last 20,000 records are looked at.
 std::vector<feed::ClimateSample> loadClimate(uint32_t since);
 

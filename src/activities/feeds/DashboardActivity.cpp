@@ -14,6 +14,7 @@
 #if FREEINK_CAP_TEMP_HUMIDITY
 #include <EnvironmentSensor.h>
 #endif
+#include "HalPowerManager.h"
 #include "HapticFeedback.h"
 #include "MappedInputManager.h"
 #include "WeatherIcons.h"
@@ -32,8 +33,13 @@ constexpr time_t CLOCK_SET_AFTER = 1700000000;  // before about 2023 the clock w
 DashboardActivity::DashboardActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("Dashboard", renderer, mappedInput) {}
 
+uint8_t DashboardActivity::pageAfter(const uint8_t page, const int delta) {
+  return static_cast<uint8_t>((page + PAGE_COUNT + delta) % PAGE_COUNT);
+}
+
 void DashboardActivity::onEnter() {
   Activity::onEnter();
+  APP_STATE.dashboardPage = PAGE_MAIN;
   reload();
   requestUpdate();
 }
@@ -59,7 +65,7 @@ void DashboardActivity::load() {
       indoorOk_ = true;
       indoorC_ = c;
       indoorPct_ = static_cast<int>(h + 0.5f);
-      feeds::logClimate(c, h);  // kept for the climate graph when it has moved enough
+      feeds::logClimate(c, h, static_cast<uint8_t>(powerManager.getBatteryPercentage()));  // for the climate graph
     }
   }
 #endif
@@ -125,7 +131,8 @@ void DashboardActivity::loadPageData() {
 void DashboardActivity::turnPage(const int delta) {
   {
     RenderLock lock(*this);
-    page_ = static_cast<Page>((page_ + PAGE_COUNT + delta) % PAGE_COUNT);
+    page_ = static_cast<Page>(pageAfter(page_, delta));
+    APP_STATE.dashboardPage = page_;  // the sleep screen shows the page you left it on
     loadPageData();
   }
   requestUpdate();
@@ -178,6 +185,8 @@ bool DashboardActivity::wantedOnSleep() {
 void DashboardActivity::drawSleepScreen(GfxRenderer& renderer, MappedInputManager& mappedInput) {
   DashboardActivity page(renderer, mappedInput);
   page.load();
+  page.page_ = static_cast<Page>(APP_STATE.dashboardPage % PAGE_COUNT);
+  page.loadPageData();
   page.drawPage(false);
 }
 
@@ -255,16 +264,16 @@ void DashboardActivity::drawPage(const bool withHints) {
     case PAGE_COUNT:
       break;
   }
-  if (withHints) {
-    const int dotsY = height - metrics.buttonHintsHeight - 14;  // which page this is
-    for (int i = 0; i < PAGE_COUNT; ++i) {
-      const int cx = width / 2 + (i - (PAGE_COUNT - 1) * 1.0f / 2) * 24;
-      if (i == page_) {
-        renderer.fillRect(static_cast<int>(cx) - 6, dotsY - 6, 12, 12, true);
-      } else {
-        renderer.drawRect(static_cast<int>(cx) - 6, dotsY - 6, 12, 12, true);
-      }
+  const int dotsY = height - (withHints ? metrics.buttonHintsHeight : 0) - 14;  // which page this is
+  for (int i = 0; i < PAGE_COUNT; ++i) {
+    const int cx = width / 2 + static_cast<int>((i - (PAGE_COUNT - 1) * 0.5f) * 24);
+    if (i == page_) {
+      renderer.fillRect(cx - 6, dotsY - 6, 12, 12, true);
+    } else {
+      renderer.drawRect(cx - 6, dotsY - 6, 12, 12, true);
     }
+  }
+  if (withHints) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "Refresh", "<", ">");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
@@ -492,9 +501,9 @@ void DashboardActivity::drawClimate(int y) {
     const std::string temp = t;
     const std::string humidity = std::to_string(indoorPct_) + "%";
     const int half = (width - 2 * x) / 2;
-    drawBigGlyphs(renderer, temp, x + (half - bigGlyphsWidth(temp, 64)) / 2, y, 64);
-    drawBigGlyphs(renderer, humidity, x + half + (half - bigGlyphsWidth(humidity, 64)) / 2, y, 64);
-    y += 64 + 14;
+    drawBigGlyphs(renderer, temp, x + (half - bigGlyphsWidth(temp, 56)) / 2, y, 56);
+    drawBigGlyphs(renderer, humidity, x + half + (half - bigGlyphsWidth(humidity, 56)) / 2, y, 56);
+    y += 56 + 12;
   }
   const time_t now = time(nullptr);
   const uint32_t span = climateWeek_ ? 7u * 86400u : 86400u;
@@ -502,24 +511,28 @@ void DashboardActivity::drawClimate(int y) {
   const auto data = now > CLOCK_SET_AFTER ? feed::bucketClimate(climate_, static_cast<uint32_t>(now) - span,
                                                                 static_cast<uint32_t>(now), buckets)
                                           : std::vector<feed::ClimateBucket>(buckets);
-  std::vector<float> temps(buckets), hums(buckets);
-  std::vector<bool> valid(buckets);
+  std::vector<float> temps(buckets), hums(buckets), batteries(buckets);
+  std::vector<bool> valid(buckets), batteryValid(buckets);
   for (size_t i = 0; i < buckets; ++i) {
     temps[i] = data[i].tempC;
     hums[i] = data[i].humidity;
+    batteries[i] = data[i].battery;
     valid[i] = data[i].valid;
+    batteryValid[i] = data[i].valid && data[i].hasBattery;
   }
   const int graphHeight =
-      (renderer.getScreenHeight() - metrics.buttonHintsHeight - 70 - y - 2 * (smallHeight + 14)) / 2;
-  renderer.drawText(UI_10_FONT_ID, x, y, "TEMPERATURE", true, EpdFontFamily::BOLD);
-  y += smallHeight;
-  drawGraph(renderer, x, y, width - 2 * x, graphHeight, temps, valid, "\xC2\xB0", 2.0f);
-  y += graphHeight + 14;
-  renderer.drawText(UI_10_FONT_ID, x, y, "HUMIDITY", true, EpdFontFamily::BOLD);
-  y += smallHeight;
-  drawGraph(renderer, x, y, width - 2 * x, graphHeight, hums, valid, "%", 10.0f);
-  y += graphHeight + 4;
-  renderer.drawText(UI_10_FONT_ID, x + 52, y, climateWeek_ ? "7 days ago" : "24 h ago", true);
-  centeredText(UI_10_FONT_ID, width / 2 + 30, y, climateWeek_ ? "tap: 24 hours" : "tap: 7 days", false);
-  renderer.drawText(UI_10_FONT_ID, width - x - renderer.getTextWidth(UI_10_FONT_ID, "now"), y, "now", true);
+      (renderer.getScreenHeight() - metrics.buttonHintsHeight - 70 - y - 3 * (smallHeight + 12)) / 3;
+  const auto graph = [&](const char* label, const std::vector<float>& values, const std::vector<bool>& ok,
+                         const char* unit, float minSpan) {
+    renderer.drawText(UI_10_FONT_ID, x, y, label, true, EpdFontFamily::BOLD);
+    y += smallHeight;
+    drawGraph(renderer, x, y, width - 2 * x, graphHeight, values, ok, unit, minSpan);
+    y += graphHeight + 12;
+  };
+  graph("TEMPERATURE", temps, valid, "\xC2\xB0", 2.0f);
+  graph("HUMIDITY", hums, valid, "%", 10.0f);
+  graph("BATTERY", batteries, batteryValid, "%", 10.0f);
+  renderer.drawText(UI_10_FONT_ID, x + 52, y - 6, climateWeek_ ? "7 days ago" : "24 h ago", true);
+  centeredText(UI_10_FONT_ID, width / 2 + 30, y - 6, climateWeek_ ? "tap: 24 hours" : "tap: 7 days", false);
+  renderer.drawText(UI_10_FONT_ID, width - x - renderer.getTextWidth(UI_10_FONT_ID, "now"), y - 6, "now", true);
 }

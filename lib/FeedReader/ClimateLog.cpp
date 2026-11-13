@@ -13,7 +13,7 @@ void encodeClimate(const ClimateSample& s, uint8_t out[CLIMATE_RECORD_BYTES]) {
   out[4] = static_cast<uint8_t>(t);
   out[5] = static_cast<uint8_t>(t >> 8);
   out[6] = s.humidity;
-  out[7] = 0;
+  out[7] = s.battery;
 }
 
 ClimateSample decodeClimate(const uint8_t in[CLIMATE_RECORD_BYTES]) {
@@ -22,22 +22,25 @@ ClimateSample decodeClimate(const uint8_t in[CLIMATE_RECORD_BYTES]) {
            static_cast<uint32_t>(in[3]) << 24;
   s.tempTenths = static_cast<int16_t>(static_cast<uint16_t>(in[4]) | static_cast<uint16_t>(in[5]) << 8);
   s.humidity = in[6];
+  s.battery = in[7];
   return s;
 }
 
 bool worthLogging(const ClimateSample& last, const ClimateSample& now, int minTempTenths, int minHumidity,
-                  uint32_t heartbeatSeconds) {
+                  int minBattery, uint32_t heartbeatSeconds) {
   if (last.when == 0) return true;
   if (now.when >= last.when && now.when - last.when >= heartbeatSeconds) return true;
   if (std::abs(now.tempTenths - last.tempTenths) >= minTempTenths) return true;
-  return std::abs(static_cast<int>(now.humidity) - static_cast<int>(last.humidity)) >= minHumidity;
+  if (std::abs(static_cast<int>(now.humidity) - static_cast<int>(last.humidity)) >= minHumidity) return true;
+  return now.battery != 0 && last.battery != 0 &&
+         std::abs(static_cast<int>(now.battery) - static_cast<int>(last.battery)) >= minBattery;
 }
 
 std::vector<ClimateBucket> bucketClimate(const std::vector<ClimateSample>& samples, uint32_t from, uint32_t to,
                                          size_t buckets) {
   std::vector<ClimateBucket> out(buckets);
   if (buckets == 0 || to <= from) return out;
-  std::vector<int> count(buckets, 0);
+  std::vector<int> count(buckets, 0), batteryCount(buckets, 0);
   const double span = static_cast<double>(to - from);
   for (const auto& s : samples) {
     if (s.when < from || s.when >= to) continue;
@@ -46,12 +49,20 @@ std::vector<ClimateBucket> bucketClimate(const std::vector<ClimateSample>& sampl
     out[i].tempC += static_cast<float>(s.tempTenths) / 10.0f;
     out[i].humidity += static_cast<float>(s.humidity);
     ++count[i];
+    if (s.battery != 0) {
+      out[i].battery += static_cast<float>(s.battery);
+      ++batteryCount[i];
+    }
   }
   for (size_t i = 0; i < buckets; ++i) {
     if (count[i] == 0) continue;
     out[i].valid = true;
     out[i].tempC /= static_cast<float>(count[i]);
     out[i].humidity /= static_cast<float>(count[i]);
+    if (batteryCount[i] > 0) {
+      out[i].hasBattery = true;
+      out[i].battery /= static_cast<float>(batteryCount[i]);
+    }
   }
   return out;
 }

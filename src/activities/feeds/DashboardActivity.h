@@ -29,6 +29,8 @@ class DashboardActivity final : public Activity {
   void render(RenderLock&&) override;
   // True when sleeping now should leave the dashboard: the setting is on and no book or article is open.
   static bool wantedOnSleep();
+  // The page `delta` steps from `page`, wrapping round (the page buttons use it while the device sleeps).
+  static uint8_t pageAfter(uint8_t page, int delta);
   // Draws the main page as the panel's sleep screen (no button hints), from what the last sync stored.
   static void drawSleepScreen(GfxRenderer& renderer, MappedInputManager& mappedInput);
 

@@ -28,6 +28,8 @@ class CrossPointState : public PersistableStore<CrossPointState> {
   int32_t resumePage = 0;
   // The timer wake that is armed is a feed sync (true) or only a dashboard redraw (false).
   bool pendingSync = true;
+  // The dashboard page left on the panel (0 = main); the page buttons change it while the device sleeps.
+  uint8_t dashboardPage = 0;
 
   static const char* getFilePath() { return "/.crosspoint/state.json"; }
   void toJson(JsonDocument& doc) const;

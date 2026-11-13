@@ -84,7 +84,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   xSemaphoreGive(modeMutex);
 }
 
-void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton) const {
+void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton, const uint64_t extraWakeMask) const {
 #if FREEINK_DEVICE_EEGO_A4 || FREEINK_DEVICE_PICCO
   // The frontlight driver and touch share I2C; turn the light off before touch
   // releases the bus. On Picco this also puts the TMA525C to sleep.
@@ -156,6 +156,26 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton)
   // power instead; the button cold-boots it. Returns only on USB power.
   freeink::metalio::powerOff();
 #endif
+
+  if (extraWakeMask != 0) {
+    // The power button and the extra pins all wake it. A pin that is still held would wake it straight away,
+    // so wait (a moment at most) for them to be let go; one that stays down is left out.
+    const bool activeHigh = BoardConfig::ACTIVE.input.powerActiveHigh;
+    uint64_t mask = extraWakeMask;
+    const unsigned long deadline = millis() + 3000;
+    for (int pin = 0; pin < 64; ++pin) {
+      if (((mask >> pin) & 1) == 0) continue;
+      pinMode(pin, activeHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
+      while (digitalRead(pin) == (activeHigh ? HIGH : LOW) && millis() < deadline) delay(10);
+      if (digitalRead(pin) == (activeHigh ? HIGH : LOW)) mask &= ~(1ULL << pin);
+    }
+    freeink::PowerManager::waitForPowerButtonRelease();
+    const int8_t powerPin = BoardConfig::ACTIVE.input.power;
+    if (powerPin >= 0) mask |= 1ULL << powerPin;
+    LOG_INF("PWR", "Waking on pins 0x%llx", static_cast<unsigned long long>(mask));
+    freeink::PowerManager::armWakeOnPins(mask, /*wakeLow=*/!activeHigh);
+    freeink::PowerManager::deepSleep();
+  }
 
   if (wakeOnHeldButton) {
     freeink::PowerManager::armPowerButtonWakeup();
