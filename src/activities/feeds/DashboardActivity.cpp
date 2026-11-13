@@ -448,7 +448,7 @@ void DashboardActivity::drawCalendar(int y) {
 namespace {
 // One graph of `values` (NaN-free; `valid` marks the gaps) in the box, with its range written at the left.
 void drawGraph(const GfxRenderer& r, int bx, int by, int bw, int bh, const std::vector<float>& values,
-               const std::vector<bool>& valid, const char* unit, float minSpan) {
+               const std::vector<bool>& valid, const char* unit, float minSpan, float ceiling) {
   float lo = 1e9f, hi = -1e9f;
   for (size_t i = 0; i < values.size(); ++i) {
     if (!valid[i]) continue;
@@ -465,6 +465,10 @@ void drawGraph(const GfxRenderer& r, int bx, int by, int bw, int bh, const std::
     lo = mid - minSpan / 2;
     hi = mid + minSpan / 2;
   }
+  if (hi > ceiling) {  // a percentage never shows above 100
+    lo -= hi - ceiling;
+    hi = ceiling;
+  }
   r.drawRect(bx, by, bw, bh, true);
   char label[24];
   snprintf(label, sizeof(label), "%.0f%s", static_cast<double>(hi), unit);
@@ -473,19 +477,21 @@ void drawGraph(const GfxRenderer& r, int bx, int by, int bw, int bh, const std::
   r.drawText(UI_10_FONT_ID, bx + 6, by + bh - r.getLineHeight(UI_10_FONT_ID) - 4, label, true);
   const int plotX = bx + 52;
   const int plotW = bw - 60;
+  // Readings are joined across empty slices (the log is sparse until the sensor wakes fill it in), but not across
+  // a gap longer than a quarter of the graph: that is a stretch with no data, not a straight line.
+  const size_t maxGap = std::max<size_t>(2, values.size() / 4);
   int px = -1, py = 0;
+  size_t previous = 0;
   for (size_t i = 0; i < values.size(); ++i) {
-    if (!valid[i]) {
-      px = -1;
-      continue;
-    }
+    if (!valid[i]) continue;
     const int cx = plotX + static_cast<int>(static_cast<float>(i) * static_cast<float>(plotW) /
                                             static_cast<float>(values.size() - 1));
     const int cy = by + bh - 8 - static_cast<int>((values[i] - lo) / (hi - lo) * static_cast<float>(bh - 16));
-    if (px >= 0) r.drawLine(px, py, cx, cy, 3, true);
+    if (px >= 0 && i - previous <= maxGap) r.drawLine(px, py, cx, cy, 3, true);
     r.fillRect(cx - 2, cy - 2, 5, 5, true);  // every reading is a dot, so a lone one still shows
     px = cx;
     py = cy;
+    previous = i;
   }
 }
 }  // namespace
@@ -523,15 +529,15 @@ void DashboardActivity::drawClimate(int y) {
   const int graphHeight =
       (renderer.getScreenHeight() - metrics.buttonHintsHeight - 70 - y - 3 * (smallHeight + 12)) / 3;
   const auto graph = [&](const char* label, const std::vector<float>& values, const std::vector<bool>& ok,
-                         const char* unit, float minSpan) {
+                         const char* unit, float minSpan, float ceiling) {
     renderer.drawText(UI_10_FONT_ID, x, y, label, true, EpdFontFamily::BOLD);
     y += smallHeight;
-    drawGraph(renderer, x, y, width - 2 * x, graphHeight, values, ok, unit, minSpan);
+    drawGraph(renderer, x, y, width - 2 * x, graphHeight, values, ok, unit, minSpan, ceiling);
     y += graphHeight + 12;
   };
-  graph("TEMPERATURE", temps, valid, "\xC2\xB0", 2.0f);
-  graph("HUMIDITY", hums, valid, "%", 10.0f);
-  graph("BATTERY", batteries, batteryValid, "%", 10.0f);
+  graph("TEMPERATURE", temps, valid, "\xC2\xB0", 2.0f, 1e9f);
+  graph("HUMIDITY", hums, valid, "%", 10.0f, 100.0f);
+  graph("BATTERY", batteries, batteryValid, "%", 10.0f, 100.0f);
   renderer.drawText(UI_10_FONT_ID, x + 52, y - 6, climateWeek_ ? "7 days ago" : "24 h ago", true);
   centeredText(UI_10_FONT_ID, width / 2 + 30, y - 6, climateWeek_ ? "tap: 24 hours" : "tap: 7 days", false);
   renderer.drawText(UI_10_FONT_ID, width - x - renderer.getTextWidth(UI_10_FONT_ID, "now"), y - 6, "now", true);
