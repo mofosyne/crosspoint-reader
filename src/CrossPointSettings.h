@@ -370,6 +370,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t dailySync = 0;
   uint8_t dailySyncHour = 5;
   uint8_t dailySyncCount = 1;  // syncs a day, evenly spaced from dailySyncHour
+  // Feeds: a short wake every this many minutes (0 = never) reads the room and the battery for the climate graph
+  uint8_t climateLogMinutes = 10;
   uint8_t readerMenuStyle = READER_MENU_LIST;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";

@@ -926,7 +926,8 @@ TEST(Calendar, PruneKeepsFutureAndRepeatingEvents) {
 }
 
 TEST(ClimateLog, RecordsRoundTrip) {
-  feed::ClimateSample s{1794233000u, -37, 64, 87};
+  feed::ClimateSample s{
+      1794233000u, -37, 64, 87, 4012, static_cast<uint8_t>(feed::CLIMATE_CHARGING | (feed::WAKE_SYNC << 4)), 42};
   uint8_t bytes[feed::CLIMATE_RECORD_BYTES];
   feed::encodeClimate(s, bytes);
   const auto back = feed::decodeClimate(bytes);
@@ -934,6 +935,10 @@ TEST(ClimateLog, RecordsRoundTrip) {
   EXPECT_EQ(back.tempTenths, -37);
   EXPECT_EQ(back.humidity, 64);
   EXPECT_EQ(back.battery, 87);
+  EXPECT_EQ(back.millivolts, 4012);
+  EXPECT_EQ(back.awake, 42);
+  EXPECT_EQ(back.flags & feed::CLIMATE_CHARGING, feed::CLIMATE_CHARGING);
+  EXPECT_EQ(feed::climateWakeOf(back), feed::WAKE_SYNC);
 }
 
 TEST(ClimateLog, LogsOnlyWhenSomethingMoved) {

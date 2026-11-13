@@ -45,9 +45,14 @@ struct CalendarStatus {
 void saveCalendarStatus(const std::vector<CalendarStatus>& status);
 std::vector<CalendarStatus> loadCalendarStatus();
 
-// The indoor climate log, /feeds/climate.bin (8 byte records, see ClimateLog.h). A reading is appended only when
-// it has moved enough since the last one (or on a slow heartbeat). Returns true when one was written.
-bool logClimate(float tempC, float humidityPct, uint8_t batteryPct);
+// The climate log, /feeds/climate2.bin (12 byte records, see ClimateLog.h): the room's temperature and humidity and
+// the battery, with what the device was doing. takeClimateReading() measures; logClimate() appends a reading only
+// when something moved enough since the last one (or on a slow heartbeat), and returns true when it wrote one.
+// takeClimateReading() is false when the room sensor does not answer (the battery fields are still filled in).
+bool takeClimateReading(uint8_t wake, feed::ClimateSample& out);
+bool logClimate(feed::ClimateSample sample);
+// Appends already-chosen readings to the log (the ones a sensor wake kept in retained memory).
+void appendClimateRecords(const feed::ClimateSample* samples, size_t count);
 // Readings from `since` (seconds since 1970) on, oldest first; at most the last 20,000 records are looked at.
 std::vector<feed::ClimateSample> loadClimate(uint32_t since);
 

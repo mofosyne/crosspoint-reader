@@ -2,29 +2,42 @@
 
 > ## This is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)
 >
-> Maintained by [@mofosyne](https://github.com/mofosyne), mainly for the Seeed reTerminal Sticky (ESP32-S3 with
-> 8 MB PSRAM). Everything below this banner is upstream's work and documentation. `main` is this fork and `develop`
-> mirrors upstream.
+> Maintained by [@mofosyne](https://github.com/mofosyne). Everything below this banner is upstream's work and
+> documentation. `main` is this fork and `develop` mirrors upstream.
+>
+> **Sticky-only firmware.** The additions are written for and tested on one device: the **Seeed reTerminal Sticky**
+> (ESP32-S3, 8 MB PSRAM, 800x480 e-paper). They depend on its hardware (PSRAM, the SHT40 temperature and humidity
+> sensor, the BQ27220 battery gauge, the up and down buttons as wake pins, touch) and are only built in the `sticky`
+> environment (`CROSSPOINT_FEEDS`, `CROSSPOINT_ZIM`). **Other boards are not supported or tested** by these
+> changes; the upstream firmware for them is unchanged.
 >
 > **Why it is a fork:** CrossPoint's [`SCOPE.md`](SCOPE.md) rules out RSS readers, news aggregators and background
 > Wi-Fi, and keeps the X3/X4 (ESP32-C3, about 380 KB RAM, no PSRAM) as the resource baseline. The additions below
 > go against the first and need the PSRAM of the second, so they are not expected to be upstreamed.
 >
-> **Added on top of upstream** (build flags `CROSSPOINT_FEEDS`, `CROSSPOINT_ZIM`, in the Sticky build):
+> **Added on top of upstream**
 >
+> - **Dashboard** (Extras): four pages, stepped with the page buttons: main (date, outdoor temperature and symbol,
+>   what to wear, indoor temperature and humidity, events and the next holiday), forecast, a climate graph
+>   (temperature, humidity, battery) and a month calendar. It can be the sleep screen, with the page buttons
+>   waking the device to flip pages, a midnight redraw, and a timed sync. Weather comes from Open-Meteo; calendars
+>   are iCal feeds (including a private one, region-filtered public holidays) and a hand-written events file.
+> - **Climate log**: readings of the room and the battery, taken at every wake and optionally by a short
+>   sensor-only wake every few minutes, kept in `/feeds/climate2.bin`. `scripts/battery_report.py` turns it into a
+>   battery report.
 > - **Feed reader**: RSS, Atom, sitemap and index-page sources with manual sync, Hacker News and WordPress
->   comments, and cached articles that open in the same viewer. Sources live in `/feeds/sources.txt`.
->   *(Rejected by `SCOPE.md`.)*
-> - **Dashboard**: date, Open-Meteo forecast and unread headlines, configured in `/feeds/dashboard.txt`.
-> - **ZIM reader**: browse and read offline archives such as Wikipedia from the SD card. *(Needs PSRAM.)*
-> - **Web editor** for the feed files at `/feeds` while File Transfer runs.
+>   comments, and cached articles that open in the same viewer. *(Rejected by `SCOPE.md`.)*
+> - **Flashcards**: spaced-repetition decks (Hector68's `/cards/<deck>/cards.tsv` layout), word lists to discover
+>   words by level (`scripts/build_wordlists.py`, JLPT and HSK), and adding words from the dictionary. Japanese
+>   and Chinese need a CJK font on the SD card (`scripts/subset_cjk_font.py`).
+> - **ZIM reader**: browse and read offline archives such as Wikipedia from the SD card. *(Needs PSRAM, and does
+>   not fit alongside the CJK font.)*
+> - **Web pages** for all of this at `/feeds` and `/flashcards` while File Transfer runs.
 > - **Sleep resume**: ZIM and feed articles stay on screen while asleep and reopen on wake.
 > - Serial debug console for driving a Sticky from a PC (`CROSSPOINT_SERIAL_INPUT`).
 >
-> **Planned:** Anki-style flashcards for Japanese and Chinese, based on
-> [Hector68's fork](https://github.com/Hector68/crosspoint-reader), with dictionary lookup, word discovery by level
-> and web upload.
-
+> Credit: the flashcard format and ideas come from
+> [Hector68's fork](https://github.com/Hector68/crosspoint-reader).
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
 

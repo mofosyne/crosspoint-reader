@@ -52,6 +52,7 @@
 #include "activities/feeds/ScheduledRedrawActivity.h"
 #include "feeds/FeedArticleView.h"
 #include "feeds/FeedStore.h"
+#include "feeds/SensorWake.h"
 #endif
 #include "WifiCredentialStore.h"
 #include "activities/Activity.h"
@@ -482,25 +483,41 @@ static bool holdSleepWhileUsbPowered() {
 #endif
 
 static volatile bool sleepRequested = false;
-static bool scheduledWake = false;     // this boot came from the daily sync timer
-static int pageWake = 0;               // a page button woke the dashboard: +1 next, -1 previous
-static bool debugWakeRedraw = false;   // SLEEPTIMER:<s>R wakes for a redraw only
+static bool scheduledWake = false;  // this boot came from the daily sync timer
+static int pageWake = 0;            // a page button woke the dashboard: +1 next, -1 previous
+static uint8_t debugWakeKind = 2;   // SLEEPTIMER:<s> wakes for a sync, :<s>R for a redraw, :<s>S for a sensor reading
 static uint32_t debugWakeSeconds = 0;  // SLEEPTIMER: debug override of the next wake delay
 void requestDeepSleep() { sleepRequested = true; }
 
 #if CROSSPOINT_FEEDS
 static uint32_t plannedWakeSeconds = 0;
 
-// Seconds until the next timed wake, and whether that wake syncs (true) or only redraws the dashboard
-// (false, no Wi-Fi). Syncs run `dailySyncCount` times a day, evenly spaced from `dailySyncHour`; a redraw
-// at 00:05 rolls the date and events over. 0 when no wake is wanted: the setting is off, the dashboard is
-// not what the panel will show, the clock was never set, or the battery is low.
-static uint32_t planNextWake(bool& syncWake) {
-  syncWake = !debugWakeRedraw;
-  if (debugWakeSeconds != 0) return debugWakeSeconds;
-  if (!SETTINGS.dailySync || !DashboardActivity::wantedOnSleep() || powerManager.getBatteryPercentage() < 20) return 0;
+// What the next timed wake is, and when.
+struct WakePlan {
+  uint32_t seconds = 0;             // until the next wake of any kind; 0 = no timed wake
+  uint8_t kind = feed::WAKE_OTHER;  // WAKE_SYNC, WAKE_REDRAW or WAKE_SENSOR
+  uint32_t majorSeconds = 0;        // until the next sync or redraw, 0 = none (what a sensor wake works towards)
+  uint8_t majorKind = feed::WAKE_REDRAW;
+  uint32_t intervalSeconds = 0;  // between sensor wakes, 0 = none
+};
+
+// Syncs run `dailySyncCount` times a day, evenly spaced from `dailySyncHour`; a redraw at 00:05 rolls the date and
+// events over; a sensor wake every `climateLogMinutes` reads the room and the battery without lighting the panel.
+// No timed wake at all when the dashboard is not what the panel will show, the clock was never set, or the battery
+// is low.
+static WakePlan planNextWake() {
+  WakePlan plan;
+  if (debugWakeSeconds != 0) {
+    plan.seconds = debugWakeSeconds;
+    plan.kind = debugWakeKind;
+    plan.majorSeconds = debugWakeKind == feed::WAKE_SENSOR ? 0 : debugWakeSeconds;
+    plan.majorKind = debugWakeKind == feed::WAKE_SENSOR ? feed::WAKE_REDRAW : debugWakeKind;
+    plan.intervalSeconds = debugWakeSeconds;
+    return plan;
+  }
+  if (!DashboardActivity::wantedOnSleep() || powerManager.getBatteryPercentage() < 20) return plan;
   const time_t now = time(nullptr);
-  if (now < 1700000000) return 0;
+  if (now < 1700000000) return plan;
   struct tm today;
   localtime_r(&now, &today);
   const auto nextAt = [&](int hour, int minute) {
@@ -517,25 +534,38 @@ static uint32_t planNextWake(bool& syncWake) {
     }
     return at;
   };
-  const int count = std::clamp<int>(SETTINGS.dailySyncCount, 1, 4);
-  time_t best = 0;
-  bool bestSyncs = true;
-  bool midnightSync = false;
-  for (int k = 0; k < count; ++k) {
-    const int hour = (SETTINGS.dailySyncHour + k * 24 / count) % 24;
-    midnightSync |= hour == 0;
-    const time_t at = nextAt(hour, 0);
-    if (best == 0 || at < best) best = at;
+  if (SETTINGS.dailySync) {
+    const int count = std::clamp<int>(SETTINGS.dailySyncCount, 1, 4);
+    time_t best = 0;
+    bool bestSyncs = true;
+    bool midnightSync = false;
+    for (int k = 0; k < count; ++k) {
+      const int hour = (SETTINGS.dailySyncHour + k * 24 / count) % 24;
+      midnightSync |= hour == 0;
+      const time_t at = nextAt(hour, 0);
+      if (best == 0 || at < best) best = at;
+    }
+    if (!midnightSync) {  // a sync at midnight already redraws
+      const time_t at = nextAt(0, 5);
+      if (at < best) {
+        best = at;
+        bestSyncs = false;
+      }
+    }
+    plan.majorSeconds = best > now ? static_cast<uint32_t>(best - now) : 0;
+    plan.majorKind = bestSyncs ? feed::WAKE_SYNC : feed::WAKE_REDRAW;
   }
-  if (!midnightSync) {  // a sync at midnight already redraws
-    const time_t at = nextAt(0, 5);
-    if (at < best) {
-      best = at;
-      bestSyncs = false;
+  plan.seconds = plan.majorSeconds;
+  plan.kind = plan.majorKind;
+  if (SETTINGS.climateLogMinutes > 0) {
+    plan.intervalSeconds = static_cast<uint32_t>(SETTINGS.climateLogMinutes) * 60;
+    const uint32_t sensorIn = plan.intervalSeconds - static_cast<uint32_t>(now) % plan.intervalSeconds;  // on the clock
+    if (plan.seconds == 0 || sensorIn < plan.seconds) {
+      plan.seconds = sensorIn < 20 ? sensorIn + plan.intervalSeconds : sensorIn;
+      plan.kind = feed::WAKE_SENSOR;
     }
   }
-  syncWake = bestSyncs;
-  return best > now ? static_cast<uint32_t>(best - now) : 0;
+  return plan;
 }
 #endif
 
@@ -575,7 +605,19 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.showBootScreen = false;
 
 #if CROSSPOINT_FEEDS
-  plannedWakeSeconds = planNextWake(APP_STATE.pendingSync);  // saved below, so the wake knows what it is for
+  {
+    const WakePlan plan = planNextWake();
+    plannedWakeSeconds = plan.seconds;
+    APP_STATE.pendingSync = plan.kind == feed::WAKE_SYNC;  // saved below, so the wake knows what it is for
+    // and the same in the chip's retained memory, for a sensor wake that never starts the card
+    feeds::SleepPlan& kept = feeds::sleepPlan();
+    const time_t stamp = time(nullptr);
+    kept.nextKind = plan.kind;
+    kept.intervalSeconds = plan.intervalSeconds;
+    kept.majorAt = plan.majorSeconds != 0 && stamp > 1700000000 ? static_cast<uint32_t>(stamp) + plan.majorSeconds : 0;
+    kept.majorKind = plan.majorKind;
+    kept.logEvery = debugWakeSeconds != 0 && debugWakeKind == feed::WAKE_SENSOR;  // SLEEPTIMER:<s>S, for testing
+  }
 #endif
   APP_STATE.saveToFile();
 
@@ -612,7 +654,9 @@ void enterDeepSleep(bool fromTimeout = false) {
 #if CROSSPOINT_FEEDS
   if (plannedWakeSeconds != 0) {
     LOG_INF("MAIN", "Timed wake in %lu s (%s)", static_cast<unsigned long>(plannedWakeSeconds),
-            APP_STATE.pendingSync ? "sync" : "redraw");
+            feeds::sleepPlan().nextKind == feed::WAKE_SENSOR ? "sensor"
+            : APP_STATE.pendingSync                          ? "sync"
+                                                             : "redraw");
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(plannedWakeSeconds) * 1000000ULL);
   }
 #endif
@@ -688,6 +732,14 @@ void setup() {
 #endif
 
   HalSystem::begin();
+#if CROSSPOINT_FEEDS
+  // A sensor-timer wake: read the room and the battery and go straight back to sleep, before the display, the
+  // card and the rest start. It only returns when a full start is wanted (the room changed enough to redraw the
+  // dashboard, or the readings kept so far must be written to the card).
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER && feeds::sleepPlan().nextKind == feed::WAKE_SENSOR) {
+    feeds::runSensorWake();
+  }
+#endif
   // checkPanic() clears the watchdog capture marker after a successful SD
   // dump, so retain the boot classification for the later activity route.
   const bool rebootedFromPanic = HalSystem::isRebootFromPanic();
@@ -815,6 +867,20 @@ void setup() {
   // Restore the monotonic clock floor before anything reads time() (event
   // timestamps, loan-expiry checks).
   trustedtime::init();
+#if CROSSPOINT_FEEDS
+  {  // a reading at every wake, tagged with what woke the device, for the climate graph and battery reports
+    feed::ClimateSample reading;
+    const uint8_t timed = feeds::sleepPlan().nextKind;  // what the timer was set for before the last sleep
+    const uint8_t kind = pageWake != 0 ? feed::WAKE_PAGE
+                         : scheduledWake
+                             ? (timed == feed::WAKE_SYNC || timed == feed::WAKE_SENSOR ? timed : feed::WAKE_REDRAW)
+                         : wakeupReason == HalGPIO::WakeupReason::PowerButton ? feed::WAKE_BUTTON
+                                                                              : feed::WAKE_OTHER;
+    feeds::flushPendingReadings();  // what sensor wakes kept in retained memory, now the card is up
+    feeds::takeClimateReading(kind, reading);
+    feeds::logClimate(reading);
+  }
+#endif
   bleturner::begin(pageturner::host, SETTINGS.ble);
 
   // Brightness and warmth are always restored. A normal wake starts with the
@@ -938,7 +1004,7 @@ void setup() {
     LOG_INF("MAIN", "Dashboard page %d, step %d", APP_STATE.dashboardPage, pageWake);
     APP_STATE.dashboardPage = DashboardActivity::pageAfter(APP_STATE.dashboardPage, pageWake);
     activityManager.replaceActivity(std::make_unique<ScheduledRedrawActivity>(renderer, mappedInputManager));
-  } else if (scheduledWake && APP_STATE.pendingSync) {
+  } else if (scheduledWake && feeds::sleepPlan().nextKind == feed::WAKE_SYNC) {
     activityManager.replaceActivity(std::make_unique<FeedSyncActivity>(renderer, mappedInputManager,
                                                                        /*checkAll=*/false, /*scheduled=*/true));
   } else if (scheduledWake) {
@@ -1057,7 +1123,7 @@ static void handleCommand(const String& cmd) {
   }
   if (cmd.startsWith("SLEEPTIMER:")) {  // sleep, and wake by the timer after N seconds (tests the daily sync)
     debugWakeSeconds = static_cast<uint32_t>(cmd.substring(11).toInt());
-    debugWakeRedraw = cmd.endsWith("R");
+    debugWakeKind = cmd.endsWith("R") ? feed::WAKE_REDRAW : cmd.endsWith("S") ? feed::WAKE_SENSOR : feed::WAKE_SYNC;
     enterDeepSleep(false);
     return;
   }

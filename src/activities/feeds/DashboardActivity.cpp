@@ -11,14 +11,12 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "FeedSyncActivity.h"
-#if FREEINK_CAP_TEMP_HUMIDITY
-#include <EnvironmentSensor.h>
-#endif
 #include "HalPowerManager.h"
 #include "HapticFeedback.h"
 #include "MappedInputManager.h"
 #include "WeatherIcons.h"
 #include "components/UITheme.h"
+#include "feeds/SensorWake.h"
 #include "fontIds.h"
 
 namespace {
@@ -56,19 +54,14 @@ void DashboardActivity::load() {
   std::string json;
   if (feeds::loadWeather(json, weatherFetched_)) feed::parseOpenMeteo(json, weather_);
 
-  indoorOk_ = false;
-#if FREEINK_CAP_TEMP_HUMIDITY
-  {
-    EnvironmentSensor sensor;
-    float c = 0, h = 0;
-    if (sensor.begin() && sensor.read(c, h)) {
-      indoorOk_ = true;
-      indoorC_ = c;
-      indoorPct_ = static_cast<int>(h + 0.5f);
-      feeds::logClimate(c, h, static_cast<uint8_t>(powerManager.getBatteryPercentage()));  // for the climate graph
-    }
+  feed::ClimateSample reading;
+  indoorOk_ = feeds::takeClimateReading(feed::WAKE_DASHBOARD, reading);
+  if (indoorOk_) {
+    indoorC_ = static_cast<float>(reading.tempTenths) / 10.0f;
+    indoorPct_ = reading.humidity;
+    feeds::logClimate(reading);                              // kept for the climate graph when it has moved enough
+    feeds::noteDrawn(reading.tempTenths, reading.humidity);  // so a sensor wake knows when to redraw
   }
-#endif
 
   events_.clear();
   const time_t now = time(nullptr);

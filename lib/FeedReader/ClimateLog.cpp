@@ -14,6 +14,10 @@ void encodeClimate(const ClimateSample& s, uint8_t out[CLIMATE_RECORD_BYTES]) {
   out[5] = static_cast<uint8_t>(t >> 8);
   out[6] = s.humidity;
   out[7] = s.battery;
+  out[8] = static_cast<uint8_t>(s.millivolts);
+  out[9] = static_cast<uint8_t>(s.millivolts >> 8);
+  out[10] = s.flags;
+  out[11] = s.awake;
 }
 
 ClimateSample decodeClimate(const uint8_t in[CLIMATE_RECORD_BYTES]) {
@@ -23,6 +27,9 @@ ClimateSample decodeClimate(const uint8_t in[CLIMATE_RECORD_BYTES]) {
   s.tempTenths = static_cast<int16_t>(static_cast<uint16_t>(in[4]) | static_cast<uint16_t>(in[5]) << 8);
   s.humidity = in[6];
   s.battery = in[7];
+  s.millivolts = static_cast<uint16_t>(in[8] | in[9] << 8);
+  s.flags = in[10];
+  s.awake = in[11];
   return s;
 }
 

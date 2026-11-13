@@ -1,5 +1,10 @@
 #include "FeedStore.h"
 
+#include <BatteryMonitor.h>
+#include <BoardConfig.h>
+#if FREEINK_CAP_TEMP_HUMIDITY
+#include <EnvironmentSensor.h>
+#endif
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -76,18 +81,37 @@ std::vector<CalendarStatus> loadCalendarStatus() {
 }
 
 namespace {
-constexpr const char* CLIMATE_PATH = "/feeds/climate.bin";
+constexpr const char* CLIMATE_PATH = "/feeds/climate2.bin";
+constexpr const char* OLD_CLIMATE_PATH = "/feeds/climate.bin";  // 8 byte records, before the battery voltage and flags
 constexpr size_t CLIMATE_MAX_RECORDS = 20000;
 }  // namespace
 
-bool logClimate(float tempC, float humidityPct, uint8_t batteryPct) {
+bool takeClimateReading(uint8_t wake, feed::ClimateSample& out) {
+  out = feed::ClimateSample{};
+  bool roomOk = false;
+#if FREEINK_CAP_TEMP_HUMIDITY
+  {
+    EnvironmentSensor sensor;
+    float c = 0, h = 0;
+    if (sensor.begin() && sensor.read(c, h)) {
+      roomOk = true;
+      out.tempTenths = static_cast<int16_t>(c * 10.0f + (c < 0 ? -0.5f : 0.5f));
+      out.humidity = static_cast<uint8_t>(h < 0 ? 0 : h > 100 ? 100 : h + 0.5f);
+    }
+  }
+#endif
+  const BatteryMonitor::Status battery = BatteryMonitor().readStatus();
+  if (battery.percentageKnown) out.battery = static_cast<uint8_t>(battery.percentage > 100 ? 100 : battery.percentage);
+  if (battery.millivoltsKnown) out.millivolts = battery.millivolts;
+  out.flags = static_cast<uint8_t>((battery.charging ? feed::CLIMATE_CHARGING : 0) |
+                                   (battery.externalPower ? feed::CLIMATE_EXTERNAL_POWER : 0) | (wake << 4));
+  return roomOk;
+}
+
+bool logClimate(feed::ClimateSample sample) {
   const time_t now = time(nullptr);
   if (now < 1700000000) return false;  // a reading with no date is no use in a graph
-  feed::ClimateSample sample;
   sample.when = static_cast<uint32_t>(now);
-  sample.tempTenths = static_cast<int16_t>(tempC * 10.0f + (tempC < 0 ? -0.5f : 0.5f));
-  sample.humidity = static_cast<uint8_t>(humidityPct < 0 ? 0 : humidityPct > 100 ? 100 : humidityPct + 0.5f);
-  sample.battery = batteryPct > 100 ? 100 : batteryPct;
 
   feed::ClimateSample last;  // the newest record, if there is one
   {
@@ -110,7 +134,21 @@ bool logClimate(float tempC, float humidityPct, uint8_t batteryPct) {
   feed::encodeClimate(sample, bytes);
   const bool ok = f.write(bytes, sizeof(bytes)) == sizeof(bytes);
   f.close();
+  if (ok && Storage.exists(OLD_CLIMATE_PATH)) Storage.remove(OLD_CLIMATE_PATH);  // replaced by the new log
   return ok;
+}
+
+void appendClimateRecords(const feed::ClimateSample* samples, size_t count) {
+  if (count == 0) return;
+  Storage.ensureDirectoryExists("/feeds");
+  HalFile f = Storage.open(CLIMATE_PATH, O_WRONLY | O_CREAT | O_APPEND);
+  if (!f) return;
+  for (size_t i = 0; i < count; ++i) {
+    uint8_t bytes[feed::CLIMATE_RECORD_BYTES];
+    feed::encodeClimate(samples[i], bytes);
+    f.write(bytes, sizeof(bytes));
+  }
+  f.close();
 }
 
 std::vector<feed::ClimateSample> loadClimate(uint32_t since) {
